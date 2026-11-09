@@ -18,6 +18,8 @@ LABELS = {
     "got_it": ["got it", "ok", "verstanden"],
     "later": ["not now", "later", "skip", "später"],
     "close": ["close", "schließen"],
+    "cancel": ["cancel", "abbrechen", "iptal", "отмена"],
+    "content_prompt": ["turn on automatic content checks", "automatic content checks", "new editing features"],
     "photos": ["photos", "photo", "fotoğraflar", "fotolar", "фото", "fotos"],
     "add_sound": ["add sound", "səs əlavə et", "ses ekle", "добавить звук", "sound hinzufügen"],
     "use": ["use", "istifadə et", "kullan", "использовать", "verwenden"],

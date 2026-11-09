@@ -20,6 +20,8 @@ class Uploader:
         self.api_ok = False
         self.api_fail = ""
         self.sound = ""
+        self.mode = "video"
+        self.replies = []
 
     async def open(self) -> None:
         page = self.page
@@ -62,6 +64,7 @@ class Uploader:
                   sound: str = "", dry_run: bool = False) -> dict:
         page = self.page
         paths = [paths] if isinstance(paths, str) else list(paths)
+        self.mode = mode
         await self.open()
         if mode == "photo":
             file_input = await self.photo_input()
@@ -75,6 +78,7 @@ class Uploader:
             await self.check_page()
             raise PageChanged("TikTok upload page changed") from exc
         await self.wait_ready()
+        await self.dismiss()
         if title:
             await self.set_title(title)
         await self.set_caption(caption)
@@ -200,6 +204,7 @@ class Uploader:
     async def set_caption(self, caption: str) -> None:
         if not caption:
             return
+        await self.dismiss()
         page = self.page
         target = page.locator('div[contenteditable="true"]').first
         try:
@@ -239,7 +244,7 @@ class Uploader:
 
     async def dismiss(self) -> None:
         page = self.page
-        for _ in range(3):
+        for _ in range(4):
             clicked = False
             for key in ("got_it", "later", "close"):
                 button = page.get_by_role("button", name=labels.exact(key)).first
@@ -250,6 +255,15 @@ class Uploader:
                         await page.wait_for_timeout(400)
                 except Exception:
                     pass
+            prompt = page.locator("[role=dialog], [aria-modal=true], [class*=modal i]").filter(
+                has_text=labels.pattern("content_prompt")).filter(has=page.get_by_role("button", name=labels.exact("cancel")))
+            try:
+                if await prompt.count() and await prompt.first.is_visible():
+                    await prompt.first.get_by_role("button", name=labels.exact("cancel")).first.click(timeout=2000)
+                    clicked = True
+                    await page.wait_for_timeout(500)
+            except Exception:
+                pass
             if not clicked:
                 return
 
@@ -278,6 +292,7 @@ class Uploader:
             return
         if 200 <= response.status < 300:
             self.api_ok = True
+            self.replies.append(response)
         elif response.status >= 400:
             self.api_fail = f"{response.status} {url[:120]}"
 
@@ -301,16 +316,47 @@ class Uploader:
             await page.wait_for_timeout(2000)
         return False
 
+    async def posted_id(self) -> str:
+        for response in reversed(self.replies):
+            try:
+                found = post_id_from(await response.json())
+            except Exception:
+                continue
+            if found:
+                return found
+        return ""
+
     async def find_post(self) -> dict:
         page = self.page
+        known = await self.posted_id()
+        if known:
+            return {"ok": True, "id": known, "kind": self.mode, "url": "", "sound": self.sound}
         try:
             if "/content" not in page.url:
                 await page.goto(CONTENT_URL, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(5000)
             href = await page.evaluate(
-                "() => { const a = [...document.querySelectorAll('a[href*=\"/video/\"], a[href*=\"/photo/\"]')][0]; return a ? a.href : ''; }")
+                "() => { const a = [...document.querySelectorAll('a[href*=\"/video/\"], a[href*=\"/photo/\"]')].find(x => !/pinned/i.test((x.closest('[class*=item i], li, tr, div') || x).innerText || '')); return a ? a.href : ''; }")
         except Exception:
             href = ""
         found = re.search(r"/(video|photo)/(\d+)", href or "")
         return {"ok": True, "id": found.group(2) if found else "", "kind": found.group(1) if found else "",
                 "url": href.split("?")[0] if found else "", "sound": getattr(self, "sound", "")}
+
+
+def post_id_from(value) -> str:
+    if isinstance(value, dict):
+        for key in ("item_id", "aweme_id", "post_id", "itemId", "awemeId"):
+            found = str(value.get(key) or "")
+            if found.isdigit() and len(found) > 10:
+                return found
+        for item in value.values():
+            found = post_id_from(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = post_id_from(item)
+            if found:
+                return found
+    return ""

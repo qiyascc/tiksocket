@@ -125,3 +125,11 @@ class ChatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_post_id_from_publish_response():
+    from tiksocket.upload import post_id_from
+
+    assert post_id_from({"status_code": 0, "data": {"item_id": "7706185908088786177"}}) == "7706185908088786177"
+    assert post_id_from({"data": [{"x": 1}, {"aweme_id": 7706185224035650822}]}) == "7706185224035650822"
+    assert post_id_from({"data": {"item_id": "12"}}) == ""
