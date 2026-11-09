@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tiksocket"
+version = "0.1.0"
+description = "Baileys alternative for TikTok: QR login, video and photo posting with music, DMs, CLI, REST API and web UI, built on Playwright"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "qiyascc" }]
+keywords = [
+  "tiktok", "baileys", "baileys-alternative", "tiktok-api", "tiktok-dm", "tiktok-messages", "tiktok-bot",
+  "tiktok-upload", "tiktok-uploader", "tiktok-photo-post", "tiktok-carousel", "tiktok-automation", "qr-login",
+  "playwright", "unofficial-api", "social-media-automation", "whatsapp-baileys", "tiktok-web",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Chat",
+  "Topic :: Internet :: WWW/HTTP :: Browsers",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = [
+  "playwright>=1.44",
+  "aiohttp>=3.9",
+  "cryptography>=42",
+  "qrcode>=7.4",
+]
+
+[project.optional-dependencies]
+decode = ["opencv-python-headless>=4.8", "numpy>=1.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+tiksocket = "tiksocket.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/qiyascc/tiksocket"
+Issues = "https://github.com/qiyascc/tiksocket/issues"
+Changelog = "https://github.com/qiyascc/tiksocket/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tiksocket"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "UP007", "UP045"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
