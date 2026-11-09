@@ -10,6 +10,7 @@ from pathlib import Path
 from .actions import Actions
 from .auth import AuthState, use_multi_file_auth_state
 from .browser import BrowserHost, BrowserOptions, snapshot
+from .captcha import CaptchaGate, Challenge
 from .constants import CAPTION_MAX, MAX_VIDEO, PHOTO_MAX, TITLE_MAX
 from .errors import BadInput, BadMedia, LoggedOut, NotConnected, TikSocketError
 from .events import EventEmitter
@@ -38,14 +39,16 @@ SOUND_MODES = ("none", "auto", "search")
 
 class TikSocket(EventEmitter):
     def __init__(self, auth: AuthState | str | os.PathLike = "tiksocket_auth", *, headless: bool = True,
-                 proxy: str = "", timezone: str = "UTC", browser: BrowserHost | None = None, uploads: int = 2):
+                 proxy: str = "", timezone: str = "UTC", browser: BrowserHost | None = None, uploads: int = 2,
+                 captcha_timeout: float = 600.0):
         super().__init__()
+        self.captcha = CaptchaGate(self.emit, captcha_timeout)
         self.auth = auth if isinstance(auth, AuthState) else use_multi_file_auth_state(auth)
         self.host = browser or BrowserHost(BrowserOptions(headless=headless, proxy=proxy, timezone=timezone))
         self.own_host = browser is None
         self.timezone = timezone
-        self.messenger = Messenger(self.host, self.auth, self.emit, timezone)
-        self.actions = Actions(self.host, self.auth)
+        self.messenger = Messenger(self.host, self.auth, self.emit, timezone, self.captcha)
+        self.actions = Actions(self.host, self.auth, self.captcha)
         self.login: QRLogin | None = None
         self.uploads = asyncio.Semaphore(max(1, uploads))
         self.state = "close"
@@ -132,7 +135,7 @@ class TikSocket(EventEmitter):
             return None
         if not live:
             return self.profile
-        context = await self.host.context(self.auth.load_state())
+        context = await self.host.context(self.auth.load_state(), self.auth.browser_folder())
         try:
             profile = await fetch_profile(context)
             if profile is None:
@@ -141,12 +144,14 @@ class TikSocket(EventEmitter):
             self.auth.save_state(await context.storage_state())
             self.auth.save_profile(profile.to_dict())
         finally:
-            await context.close()
+            await self.host.release(context)
         await self._update("open", profile=profile.to_dict())
         return profile
 
     async def logout(self) -> None:
         await self.messenger.close()
+        await self.actions.web.close()
+        await self.host.drop(self.auth.browser_folder())
         self.auth.clear()
         await self._update("close", reason="logged_out")
 
@@ -175,10 +180,10 @@ class TikSocket(EventEmitter):
         if not paths:
             raise BadMedia("nothing to upload")
         async with self.uploads:
-            context = await self.host.context(state)
+            context = await self.host.context(state, self.auth.browser_folder())
             page = await context.new_page()
             try:
-                result = await Uploader(page).run(paths, (caption or "")[:CAPTION_MAX], mode=mode,
+                result = await Uploader(page, self.captcha).run(paths, (caption or "")[:CAPTION_MAX], mode=mode,
                                                   title=(title or "")[:TITLE_MAX], sound_mode=sound_mode,
                                                   sound=(sound or "")[:80], dry_run=dry_run)
                 self.auth.save_state(await context.storage_state())
@@ -190,7 +195,7 @@ class TikSocket(EventEmitter):
                 await snapshot(page, self.auth.debug_folder(), "upload-error.png")
                 raise
             finally:
-                await context.close()
+                await self.host.release(context, page)
                 for name in temp:
                     try:
                         os.unlink(name)
@@ -366,6 +371,22 @@ class TikSocket(EventEmitter):
 
     def start_listening(self, interval: float = 25.0, history: bool = False) -> asyncio.Task:
         return self.messenger.start_listening(interval, history)
+
+    @property
+    def pending_captcha(self) -> Challenge | None:
+        return self.captcha.challenge if self.captcha.active else None
+
+    async def captcha_image(self) -> bytes:
+        return await self.captcha.image()
+
+    async def captcha_tap(self, x: float, y: float) -> None:
+        await self.captcha.tap(x, y)
+
+    async def captcha_drag(self, path) -> None:
+        await self.captcha.drag(path)
+
+    async def captcha_refresh(self) -> bool:
+        return await self.captcha.refresh()
 
     async def close(self) -> None:
         if self.login is not None:

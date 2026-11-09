@@ -13,6 +13,7 @@ from playwright.async_api import BrowserContext, Page, Response
 from . import webparse
 from .auth import AuthState
 from .browser import BrowserHost, body_text, snapshot
+from .captcha import CaptchaGate
 from .constants import HOME
 from .errors import (
     ActionFailed,
@@ -66,9 +67,10 @@ def _paths(match: Matcher) -> tuple[str, ...]:
 
 
 class WebSession:
-    def __init__(self, host: BrowserHost, auth: AuthState):
+    def __init__(self, host: BrowserHost, auth: AuthState, gate: CaptchaGate | None = None):
         self.host = host
         self.auth = auth
+        self.gate = gate or CaptchaGate(timeout=0)
         self.context: BrowserContext | None = None
         self._page: Page | None = None
         self.tab: Page | None = None
@@ -81,7 +83,7 @@ class WebSession:
         state = self.auth.load_state()
         if state is None:
             raise NotConnected("log in first")
-        self.context = await self.host.context(state)
+        self.context = await self.host.context(state, self.auth.browser_folder())
         self._page = await self.context.new_page()
         self._page.on("request", self._learn)
         await self._load(self._page, HOME, 4000)
@@ -122,6 +124,7 @@ class WebSession:
                 if response is not None and response.status == 404:
                     raise NotFound(f"TikTok has no page at {urlparse(url).path}")
                 await page.wait_for_timeout(settle)
+                await self.gate.hold(page)
                 await self.check()
                 await self.dismiss()
                 return page
@@ -142,13 +145,8 @@ class WebSession:
             return
         if "/login" in page.url:
             raise LoggedOut("TikTok session ended")
-        try:
-            if await page.locator("#captcha-verify-container, #captcha_container, .captcha_verify_container").count():
-                raise CaptchaRequired("TikTok asked for a captcha")
-        except TikSocketError:
-            raise
-        except Exception:
-            pass
+        if await self.gate.detect(page):
+            raise CaptchaRequired("TikTok asked for a captcha")
 
     async def dismiss(self) -> None:
         page = self.view
@@ -295,34 +293,40 @@ class WebSession:
                      method: str = "POST") -> dict:
         await self.page()
         paths = _paths(match)
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future = loop.create_future()
+        for attempt in range(2):
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()
 
-        def on_response(response: Response) -> None:
-            if future.done():
-                return
-            if response.request.method.upper() == method and any(p in urlparse(response.url).path for p in paths):
-                future.set_result(response)
+            def on_response(response: Response, future=future) -> None:
+                if future.done():
+                    return
+                if response.request.method.upper() == method and any(p in urlparse(response.url).path for p in paths):
+                    future.set_result(response)
 
-        self.context.on("response", on_response)
-        try:
-            await action()
-            response = await asyncio.wait_for(future, wait)
-        except TikSocketError:
-            raise
-        except Exception as exc:
-            await snapshot(self.view, self.auth.debug_folder(), "web-action-error.png")
-            raise ActionFailed("TikTok did not confirm the action") from exc
-        finally:
-            self.context.remove_listener("response", on_response)
-        try:
-            data = await response.json()
-        except Exception:
-            data = {}
-        if response.status >= 400:
-            raise ActionFailed(f"TikTok answered {response.status}")
-        self.raise_for(data if isinstance(data, dict) else {})
-        return data if isinstance(data, dict) else {}
+            self.context.on("response", on_response)
+            try:
+                await action()
+                response = await asyncio.wait_for(future, wait)
+            except TikSocketError:
+                if attempt == 0 and await self.gate.hold(self.view):
+                    continue
+                raise
+            except Exception as exc:
+                if attempt == 0 and await self.gate.hold(self.view):
+                    continue
+                await snapshot(self.view, self.auth.debug_folder(), "web-action-error.png")
+                raise ActionFailed("TikTok did not confirm the action") from exc
+            finally:
+                self.context.remove_listener("response", on_response)
+            try:
+                data = await response.json()
+            except Exception:
+                data = {}
+            if response.status >= 400:
+                raise ActionFailed(f"TikTok answered {response.status}")
+            self.raise_for(data if isinstance(data, dict) else {})
+            return data if isinstance(data, dict) else {}
+        raise ActionFailed("TikTok did not confirm the action")
 
     async def find(self, selectors: Iterable[str], timeout: float = 8.0, text: re.Pattern | None = None):
         await self.page()
@@ -401,8 +405,5 @@ class WebSession:
     async def close(self) -> None:
         if self.context is not None:
             await self.save()
-            try:
-                await self.context.close()
-            except Exception:
-                pass
+            await self.host.release(self.context, self.tab, self._page)
         self.context, self._page, self.tab = None, None, None

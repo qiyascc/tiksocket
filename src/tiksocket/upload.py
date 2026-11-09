@@ -7,16 +7,18 @@ import time
 from playwright.async_api import Page
 
 from . import labels
+from .captcha import CaptchaGate
 from .constants import CONTENT_URL, UPLOAD_URL
-from .errors import BadMedia, CaptchaRequired, LoggedOut, PageChanged, PublishFailed, TikSocketError, Unavailable
+from .errors import BadMedia, LoggedOut, PageChanged, PublishFailed, TikSocketError, Unavailable
 from .js import PRESS_JS
 
 log = logging.getLogger("tiksocket")
 
 
 class Uploader:
-    def __init__(self, page: Page):
+    def __init__(self, page: Page, gate: CaptchaGate | None = None):
         self.page = page
+        self.gate = gate or CaptchaGate(timeout=0)
         self.api_ok = False
         self.api_fail = ""
         self.sound = ""
@@ -101,12 +103,7 @@ class Uploader:
         url = self.page.url.lower()
         if "/login" in url:
             raise LoggedOut("TikTok session ended")
-        try:
-            captcha = await self.page.locator("#captcha-verify-container, #captcha_container, [class*='captcha' i]").count()
-        except Exception:
-            captcha = 0
-        if captcha:
-            raise CaptchaRequired("TikTok asked for a captcha")
+        await self.gate.hold(self.page)
 
     async def wait_ready(self) -> None:
         page = self.page
@@ -269,6 +266,7 @@ class Uploader:
 
     async def click_publish(self) -> None:
         for _ in range(6):
+            await self.gate.hold(self.page)
             await self.dismiss()
             await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await self.page.wait_for_timeout(600)
@@ -301,6 +299,8 @@ class Uploader:
         started = page.url
         retries = 0
         for attempt in range(45):
+            if await self.gate.hold(page):
+                started = page.url
             await self.dismiss()
             text = await self.body_text()
             if self.api_fail or labels.matches(text, "failed"):
