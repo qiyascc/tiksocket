@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -9,16 +10,19 @@ from zoneinfo import ZoneInfo
 
 from playwright.async_api import BrowserContext, Page
 
-from . import parse
+from . import parse, webparse
 from .auth import AuthState
 from .browser import BrowserHost, body_text, snapshot
-from .constants import INBOX_URLS
+from .constants import HOME, INBOX_URLS
 from .errors import (
+    ActionFailed,
     BadInput,
     LoggedOut,
     NotConnected,
     NotDelivered,
     NotFound,
+    NotSupported,
+    PageChanged,
     RateLimited,
     RequestPending,
     TikSocketError,
@@ -306,6 +310,194 @@ class Messenger:
                 raise Unavailable("message did not appear in the chat")
             self._remember(client_id, value, "")
         return SendResult(id=value, pending=state == "pending")
+
+    async def _push(self, text: str, before: set, reopen: str = "") -> tuple[str, str]:
+        state, value = "none", ""
+        for _ in range(TRIES):
+            box = await self._editor()
+            if box is None:
+                await self._dismiss()
+                if reopen:
+                    await self._open_chat(reopen)
+                else:
+                    await self.page.wait_for_timeout(1500)
+                continue
+            try:
+                await self._type(box, text)
+            except Exception as exc:
+                log.warning("typing failed: %s", type(exc).__name__)
+                state, value = await self._check(before, text)
+                if state != "none":
+                    break
+                continue
+            state, value = await self._settle(before, text)
+            if state != "none":
+                break
+            if parse.blocked(await body_text(self.page)) == "rate_limited":
+                await snapshot(self.page, self.auth.debug_folder(), "dm-rate-limited.png")
+                raise RateLimited("TikTok asks to slow down")
+        return state, value
+
+    def _outcome(self, state: str, value: str, client_id: str) -> SendResult:
+        if state == "failed":
+            self._remember(client_id, "", value)
+            if value == "request_pending":
+                raise RequestPending("the other side has not accepted your message request yet")
+            raise NotDelivered("TikTok refused the message")
+        if state == "none":
+            raise Unavailable("message did not appear in the chat")
+        self._remember(client_id, value, "")
+        return SendResult(id=value, pending=state == "pending")
+
+    async def _current_chat(self) -> str:
+        found = await self.page.evaluate("""() => {
+          const el = document.querySelector('[data-conv-id][aria-selected=true], [data-conv-id][class*=active i], [data-conv-id][class*=selected i]');
+          if (el) return el.dataset.convId;
+          const m = location.href.match(/0:1:\\d+:\\d+/);
+          return m ? m[0] : '';
+        }""")
+        return str(found or "")
+
+    async def start_chat(self, username: str, text: str, client_id: str = "") -> tuple[str, SendResult]:
+        name = webparse.username(username)
+        text = (text or "").strip()[:4000]
+        if not name:
+            raise BadInput("give a TikTok username")
+        if not text:
+            raise BadInput("empty message")
+        async with self.lock:
+            known = self._sent().get(client_id) if client_id else None
+            if known:
+                if known.get("error"):
+                    raise from_code(known["error"], "already tried")
+                return known.get("chat", ""), SendResult(id=known["id"], repeated=True)
+            page = await self._page()
+            await page.goto(f"{HOME}@{name}", wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(4000)
+            await self._dismiss()
+            button = page.locator("[data-e2e=message-button]").first
+            if not await button.count():
+                raise NotSupported(f"@{name} does not accept messages from you on TikTok web")
+            await button.click(timeout=8000)
+            deadline = time.time() + 25
+            while time.time() < deadline and await self._editor() is None:
+                await page.wait_for_timeout(800)
+            if await self._editor() is None:
+                await snapshot(page, self.auth.debug_folder(), "dm-new-chat-error.png")
+                raise PageChanged("message box did not open")
+            await page.wait_for_timeout(1200)
+            chat_id = await self._current_chat()
+            before = {row["id"] for row in (await self._items())["items"]}
+            state, value = await self._push(text, before)
+            if state in ("failed", "none"):
+                await snapshot(page, self.auth.debug_folder(), "dm-new-chat-send.png")
+            result = self._outcome(state, value, client_id)
+            if client_id:
+                data = self._sent()
+                data.setdefault(client_id, {})["chat"] = chat_id
+                self.auth.save_json("sent.json", data)
+            return chat_id or await self._current_chat(), result
+
+    async def _open_requests(self) -> None:
+        page = self.page
+        await self._open_inbox()
+        entry = page.locator("[data-e2e*=request], div, span, a").filter(
+            has_text=re.compile(r"^\s*(Message requests|Requests)\b", re.I)).first
+        if not await entry.count():
+            raise NotSupported("TikTok web shows no message requests for this account")
+        await entry.click(timeout=6000)
+        await page.wait_for_timeout(2500)
+
+    async def requests(self) -> list[Chat]:
+        async with self.lock:
+            await self._page()
+            await self._open_requests()
+            raw = await self.page.evaluate(CHATS_JS)
+        me_id = self.me_id
+        return [Chat(id=row["id"], name=row["name"], preview=row["preview"], date=row["date"], unread=row["unread"],
+                     avatar=row["avatar"], peer_id=parse.peer_of(row["id"], me_id)) for row in parse.chats(raw)]
+
+    async def _answer_request(self, chat_id: str, label: str) -> None:
+        if not parse.CONV.match(chat_id or ""):
+            raise BadInput("bad chat id")
+        async with self.lock:
+            page = await self._page()
+            await self._open_requests()
+            target = page.locator(f'[data-conv-id="{chat_id}"]').first
+            if not await target.count():
+                raise NotFound(f"request {chat_id} not found")
+            await target.click(timeout=6000)
+            await page.wait_for_timeout(1500)
+            button = page.locator("button, [role=button]").filter(has_text=re.compile(rf"^\s*{label}\s*$", re.I)).first
+            if not await button.count():
+                raise PageChanged(f"{label} button not found")
+            await button.click(timeout=5000)
+            confirm = page.locator("[role=dialog] button").filter(has_text=re.compile(rf"^\s*{label}\s*$", re.I)).first
+            if await confirm.count():
+                await confirm.click(timeout=5000)
+            await page.wait_for_timeout(2000)
+            if await button.count() and await button.is_visible():
+                await snapshot(page, self.auth.debug_folder(), "dm-request-error.png")
+                raise ActionFailed(f"TikTok did not {label.lower()} the request")
+
+    async def accept_request(self, chat_id: str) -> None:
+        await self._answer_request(chat_id, "Accept")
+
+    async def delete_request(self, chat_id: str) -> None:
+        await self._answer_request(chat_id, "Delete")
+
+    async def _hover(self, chat_id: str, message_id: str):
+        await self._open_chat(chat_id)
+        bubble = self.page.locator(f'[data-index="{message_id}"]').first
+        if not await bubble.count():
+            raise NotFound(f"message {message_id} not found")
+        await bubble.scroll_into_view_if_needed(timeout=4000)
+        await bubble.hover(timeout=4000)
+        await self.page.wait_for_timeout(500)
+        return bubble
+
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        if not emoji:
+            raise BadInput("empty emoji")
+        async with self.lock:
+            await self._page()
+            bubble = await self._hover(chat_id, message_id)
+            opener = bubble.locator("[aria-label*=react i], [data-e2e*=reaction], [data-e2e*=emoji], [class*=Reaction]").first
+            if not await opener.count():
+                raise NotSupported("TikTok web shows no reaction button for this message")
+            await opener.click(timeout=4000)
+            choice = self.page.locator("[data-floating-ui-portal] *, [role=dialog] *, [role=menu] *").filter(
+                has_text=re.compile(rf"^\s*{re.escape(emoji)}\s*$")).last
+            if not await choice.count():
+                raise NotSupported(f"{emoji} is not in TikTok's quick reactions")
+            await choice.click(timeout=4000)
+            await self.page.wait_for_timeout(1500)
+            if emoji not in (await bubble.inner_text(timeout=3000)):
+                raise ActionFailed("reaction did not show up")
+
+    async def reply_to(self, chat_id: str, message_id: str, text: str, client_id: str = "") -> SendResult:
+        text = (text or "").strip()[:4000]
+        if not text:
+            raise BadInput("empty message")
+        async with self.lock:
+            known = self._sent().get(client_id) if client_id else None
+            if known:
+                return SendResult(id=known.get("id", ""), repeated=True)
+            await self._page()
+            bubble = await self._hover(chat_id, message_id)
+            button = bubble.locator("[aria-label*=reply i], [data-e2e*=reply]").first
+            if not await button.count():
+                more = self.page.locator("[id^=more-action-icon-msg-]").last
+                if await more.count():
+                    await more.click(timeout=3000)
+                button = self.page.locator("[role=menu] *, [data-floating-ui-portal] *").filter(
+                    has_text=re.compile(r"^\s*Reply\s*$", re.I)).first
+            if not await button.count():
+                raise NotSupported("TikTok web shows no reply option for this message")
+            await button.click(timeout=4000)
+            before = {row["id"] for row in (await self._items())["items"]}
+            state, value = await self._push(text, before, chat_id)
+            return self._outcome(state, value, client_id)
 
     def _sent(self) -> dict:
         cutoff = time.time() - SENT_TTL
