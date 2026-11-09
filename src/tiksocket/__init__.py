@@ -19,7 +19,7 @@ from .errors import (
 )
 from .models import Chat, Message, PostResult, Profile, QRCode, SendResult, VerifyPrompt
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "AuthState", "BadInput", "BadMedia", "BrowserHost", "BrowserOptions", "CaptchaRequired", "Chat", "LoggedOut",

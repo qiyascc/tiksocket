@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Uploads close TikTok's "Turn on automatic content checks?" prompt with its own Cancel button before writing the caption, so the page is never blocked
+- The posted id is read from TikTok's publish response, and the content page fallback skips pinned posts
+
 ## 0.1.0
 
 First public release.
