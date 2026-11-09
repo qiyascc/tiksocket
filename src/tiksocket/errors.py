@@ -79,9 +79,24 @@ class LoginExpired(TikSocketError):
     status = 410
 
 
+class ActionFailed(TikSocketError):
+    code = "action_failed"
+    status = 502
+
+
+class PrivateAccount(TikSocketError):
+    code = "private"
+    status = 403
+
+
+class NotSupported(TikSocketError):
+    code = "not_supported"
+    status = 501
+
+
 ERRORS = {cls.code: cls for cls in (NotConnected, LoggedOut, CaptchaRequired, RateLimited, Unavailable, PageChanged,
                                     BadMedia, PublishFailed, RequestPending, NotDelivered, NotFound, BadInput,
-                                    LoginExpired)}
+                                    LoginExpired, ActionFailed, PrivateAccount, NotSupported)}
 
 
 def from_code(code: str, message: str = "") -> TikSocketError:
