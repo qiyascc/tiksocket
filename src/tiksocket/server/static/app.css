@@ -60,6 +60,7 @@ main.solo { grid-template-columns: minmax(0, 860px); justify-content: center; }
 .cap-stage { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #000; min-height: 160px; }
 .cap-img { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; user-select: none; }
 .cap-img:active { cursor: grabbing; }
+.cap-img[hidden] { display: none; }
 .cap-wait { position: absolute; inset: 0; display: grid; place-items: center; color: #9ca3af; }
 .cap-wait[hidden] { display: none; }
 dialog.cap-modal { width: min(920px, calc(100vw - 24px)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: var(--card); color: var(--ink); }

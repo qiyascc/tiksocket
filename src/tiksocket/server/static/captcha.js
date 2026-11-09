@@ -6,7 +6,7 @@
     root.innerHTML = `
       <div class="cap-head"><b class="cap-title">TikTok verification</b><span class="cap-timer muted"></span></div>
       <p class="muted cap-hint">This is the live TikTok page. Drag the slider or click the objects on the picture exactly as you would on TikTok.</p>
-      <div class="cap-stage"><img class="cap-img" alt="TikTok captcha" draggable="false"><div class="cap-wait muted">Loading the picture...</div></div>
+      <div class="cap-stage"><img class="cap-img" alt="" draggable="false" hidden><div class="cap-wait muted">Loading the picture...</div></div>
       <div class="row"><button type="button" class="ghost small cap-refresh">New puzzle</button><span class="cap-status muted grow"></span>${onClose ? '<button type="button" class="ghost small cap-close">Hide</button>' : ""}</div>`;
     const $ = (s) => root.querySelector(s);
     const img = $(".cap-img");
@@ -24,7 +24,7 @@
     const status = (text) => { $(".cap-status").textContent = text || ""; };
     const shot = () => new Promise((resolve) => {
       const next = new Image();
-      next.onload = () => { img.src = next.src; $(".cap-wait").hidden = true; resolve(); };
+      next.onload = () => { img.src = next.src; img.hidden = false; $(".cap-wait").hidden = true; resolve(); };
       next.onerror = () => resolve();
       next.src = `${api}/captcha/image?token=${encodeURIComponent(token)}&t=${Date.now()}`;
     });
@@ -36,6 +36,8 @@
           const was = pending;
           pending = null;
           status(was ? "Solved, TikTok continues." : "No captcha is waiting right now.");
+          img.hidden = true;
+          img.removeAttribute("src");
           $(".cap-wait").hidden = false;
           $(".cap-wait").textContent = was ? "Solved" : "Nothing to solve.";
           if (was && onClose) setTimeout(() => onClose(true), 1200);
