@@ -30,14 +30,15 @@ DETECT_JS = r"""([selectors, words]) => {
     return r.width > 40 && r.height > 40 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   const title = (e) => ((e.innerText || '').trim().split('\n')[0] || '').slice(0, 120);
+  const box = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
   for (const selector of selectors) {
     for (const e of document.querySelectorAll(selector)) {
-      if (shown(e)) return {found: true, title: title(e), kind: kindOf(e)};
+      if (shown(e)) return {found: true, title: title(e), kind: kindOf(e), box: box(e)};
     }
   }
   const boxes = document.querySelectorAll('[role=dialog], .TUXModal, [class*=Modal], [class*=modal]');
   for (const e of boxes) {
-    if (shown(e) && pattern.test(e.innerText || '')) return {found: true, title: title(e), kind: kindOf(e)};
+    if (shown(e) && pattern.test(e.innerText || '')) return {found: true, title: title(e), kind: kindOf(e), box: box(e)};
   }
   return {found: false};
   function kindOf(e) {
@@ -82,6 +83,7 @@ class CaptchaGate:
         self.timeout = timeout
         self.page: Page | None = None
         self.challenge: Challenge | None = None
+        self.clip: dict | None = None
         self._turn = asyncio.Lock()
 
     @property
@@ -137,20 +139,35 @@ class CaptchaGate:
                 await self._say("captcha.failed", self.challenge)
                 raise CaptchaRequired("TikTok asked for a captcha and it was not solved in time")
             finally:
-                self.page, self.challenge = None, None
+                self.page, self.challenge, self.clip = None, None, None
 
     def _live(self) -> Page:
         if not self.active:
             raise NotFound("no captcha is waiting")
         return self.page
 
-    async def image(self, quality: int = 75) -> bytes:
-        return await self._live().screenshot(type="jpeg", quality=quality, timeout=10000)
+    async def _clip(self) -> dict:
+        page = self._live()
+        size = page.viewport_size or {"width": 1, "height": 1}
+        found = await self.detect(page)
+        box = (found or {}).get("box")
+        if not box or box[2] < 40 or box[3] < 40:
+            return {"x": 0, "y": 0, "width": size["width"], "height": size["height"]}
+        pad = 12
+        x, y = max(0, box[0] - pad), max(0, box[1] - pad)
+        width = min(size["width"] - x, box[2] + pad * 2)
+        height = min(size["height"] - y, box[3] + pad * 2)
+        return {"x": x, "y": y, "width": width, "height": height}
+
+    async def image(self, quality: int = 80) -> bytes:
+        self.clip = await self._clip()
+        return await self._live().screenshot(type="jpeg", quality=quality, timeout=10000, clip=self.clip)
 
     def _point(self, x, y) -> tuple[float, float]:
         page = self._live()
         size = page.viewport_size or {"width": 1, "height": 1}
-        return _norm(x) * size["width"], _norm(y) * size["height"]
+        clip = self.clip or {"x": 0, "y": 0, "width": size["width"], "height": size["height"]}
+        return clip["x"] + _norm(x) * clip["width"], clip["y"] + _norm(y) * clip["height"]
 
     async def tap(self, x, y) -> None:
         page = self._live()

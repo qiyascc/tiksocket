@@ -4,15 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TikSocket captcha</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="static/app.css">
 </head>
 <body>
 <main class="solo"><section class="card" id="cap"></section></main>
-<script src="/static/captcha.js"></script>
+<script src="static/captcha.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const token = params.get("token") || "";
-  TikCaptcha.mount(document.getElementById("cap"), { api: params.get("api") || "/api", token });
+  TikCaptcha.mount(document.getElementById("cap"), { api: params.get("api") || "api", token });
 </script>
 </body>
 </html>

@@ -68,7 +68,8 @@ async def test_waits_for_a_person_and_continues(page):
     assert isinstance(gate.challenge, Challenge)
     assert gate.challenge.kind == "slide"
     assert (await gate.image())[:2] == b"\xff\xd8"
-    await gate.drag([[0.29, 0.52, 0], [0.4, 0.52, 40], [0.55, 0.52, 40]])
+    assert gate.clip == {"x": 188, "y": 88, "width": 424, "height": 324}
+    await gate.drag([[0.11, 0.84, 0], [0.4, 0.84, 40], [0.8, 0.84, 40]])
     assert await asyncio.wait_for(waiting, 15) is True
     assert events == ["captcha.required", "captcha.solved"]
     assert not gate.active
