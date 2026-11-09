@@ -131,6 +131,12 @@ class WebSession:
             except TikSocketError:
                 raise
             except Exception as exc:
+                if "ERR_HTTP_RESPONSE_CODE_FAILURE" in str(exc):
+                    refused += 1
+                    log.warning("TikTok refused %s with an empty error page (try %s)", urlparse(url).path, attempt + 1)
+                    await asyncio.sleep(delay * 2)
+                    delay *= 2
+                    continue
                 log.warning("page load failed (try %s): %s", attempt + 1, type(exc).__name__)
                 await asyncio.sleep(delay)
                 delay *= 2
