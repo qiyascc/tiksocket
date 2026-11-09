@@ -2,21 +2,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
-from .constants import USER_AGENT, VIEWPORT
+from .constants import VIEWPORT
 
 log = logging.getLogger("tiksocket")
+PLATFORMS = {"linux": "X11; Linux x86_64", "darwin": "Macintosh; Intel Mac OS X 10_15_7",
+             "win32": "Windows NT 10.0; Win64; x64"}
+
+
+def matching_agent(version: str, platform: str | None = None) -> str:
+    major = (version or "131").split(".")[0]
+    system = PLATFORMS.get(platform or sys.platform, PLATFORMS["linux"])
+    return f"Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
 @dataclass
 class BrowserOptions:
     headless: bool = True
     proxy: str = ""
-    user_agent: str = USER_AGENT
+    user_agent: str = ""
     locale: str = "en-US"
     timezone: str = "UTC"
     viewport: dict = field(default_factory=lambda: dict(VIEWPORT))
@@ -48,8 +57,9 @@ class BrowserHost:
 
     async def context(self, state: dict | None = None) -> BrowserContext:
         browser = await self.browser()
+        agent = self.options.user_agent or matching_agent(browser.version)
         settings = {"viewport": dict(self.options.viewport), "locale": self.options.locale,
-                    "timezone_id": self.options.timezone, "user_agent": self.options.user_agent}
+                    "timezone_id": self.options.timezone, "user_agent": agent}
         if state:
             settings["storage_state"] = state
         return await browser.new_context(**settings)
