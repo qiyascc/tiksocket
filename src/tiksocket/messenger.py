@@ -13,6 +13,7 @@ from playwright.async_api import BrowserContext, Page
 from . import parse, webparse
 from .auth import AuthState
 from .browser import BrowserHost, body_text, snapshot
+from .captcha import CaptchaGate
 from .constants import HOME, INBOX_URLS
 from .errors import (
     ActionFailed,
@@ -46,8 +47,10 @@ SENT_TTL = 6 * 3600
 
 
 class Messenger:
-    def __init__(self, host: BrowserHost, auth: AuthState, emit: Emit, timezone: str = "UTC"):
+    def __init__(self, host: BrowserHost, auth: AuthState, emit: Emit, timezone: str = "UTC",
+                 gate: CaptchaGate | None = None):
         self.host = host
+        self.gate = gate or CaptchaGate(timeout=0)
         self.auth = auth
         self.emit = emit
         self.zone = ZoneInfo(timezone)
@@ -71,7 +74,7 @@ class Messenger:
         state = self.auth.load_state()
         if state is None:
             raise NotConnected("log in first")
-        self.context = await self.host.context(state)
+        self.context = await self.host.context(state, self.auth.browser_folder())
         self.page = await self.context.new_page()
         await self._open_inbox(fresh=True)
         return self.page
@@ -104,6 +107,7 @@ class Messenger:
                 self.inbox_url = INBOX_URLS[1]
                 await page.goto(self.inbox_url, wait_until="domcontentloaded", timeout=60000)
                 continue
+            await self.gate.hold(page)
             await self._dismiss()
             if await page.locator(ITEM).count():
                 await self._settle_list()
@@ -149,11 +153,7 @@ class Messenger:
             pass
 
     async def _reset(self) -> None:
-        if self.context is not None:
-            try:
-                await self.context.close()
-            except Exception:
-                pass
+        await self.host.release(self.context, self.page)
         self.context, self.page = None, None
 
     async def chats(self) -> list[Chat]:
@@ -374,11 +374,13 @@ class Messenger:
             page = await self._page()
             await page.goto(f"{HOME}@{name}", wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(4000)
+            await self.gate.hold(page)
             await self._dismiss()
             button = page.locator("[data-e2e=message-button]").first
             if not await button.count():
                 raise NotSupported(f"@{name} does not accept messages from you on TikTok web")
             await button.click(timeout=8000)
+            await self._leave_suite()
             deadline = time.time() + 25
             while time.time() < deadline and await self._editor() is None:
                 await page.wait_for_timeout(800)
@@ -397,6 +399,19 @@ class Messenger:
                 data.setdefault(client_id, {})["chat"] = chat_id
                 self.auth.save_json("sent.json", data)
             return chat_id or await self._current_chat(), result
+
+    async def _leave_suite(self) -> None:
+        page = self.page
+        deadline = time.time() + 10
+        while time.time() < deadline and "business-suite" not in page.url and await self._editor() is None:
+            await page.wait_for_timeout(500)
+        found = re.search(r"[?&]u=(\d+)", page.url)
+        if "business-suite" not in page.url or not found:
+            return
+        self.inbox_url = INBOX_URLS[1]
+        await page.goto(f"{INBOX_URLS[1]}&u={found.group(1)}", wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(3000)
+        await self._dismiss()
 
     async def _open_requests(self) -> None:
         page = self.page
