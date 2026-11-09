@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TikSocket</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <b class="brand">TikSocket</b>
+  <select id="account" aria-label="Account"></select>
+  <button id="add" class="ghost" type="button">Add account</button>
+  <span id="who" class="muted"></span>
+  <span class="grow"></span>
+  <span id="live" class="dot" title="Event stream"></span>
+</header>
+
+<main>
+  <section class="card" id="login-card">
+    <h2>Login</h2>
+    <div id="login-idle">
+      <p class="muted">Scan a QR code with the TikTok app, like Baileys does for WhatsApp.</p>
+      <button id="qr-start" type="button">Show QR code</button>
+      <details>
+        <summary>Log in with cookies instead</summary>
+        <textarea id="cookie" rows="3" placeholder="sessionid=...; tt_csrf_token=..."></textarea>
+        <button id="cookie-go" class="ghost" type="button">Use cookies</button>
+      </details>
+    </div>
+    <div id="login-qr" hidden>
+      <img id="qr-img" alt="QR code">
+      <ol class="muted">
+        <li>Open TikTok on your phone.</li>
+        <li>Profile, then the scan icon at the top right.</li>
+        <li>Scan this code and confirm.</li>
+      </ol>
+      <p id="qr-status" class="muted"></p>
+    </div>
+    <div id="login-verify" hidden>
+      <h3 id="v-title"></h3>
+      <div id="v-lines" class="muted"></div>
+      <form id="v-code" hidden>
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Code">
+        <button type="submit">Confirm</button>
+      </form>
+      <div id="v-buttons" class="row"></div>
+      <div id="v-shot" hidden>
+        <p class="muted">TikTok shows a puzzle. Tap or drag on the picture.</p>
+        <img id="v-img" alt="TikTok check" draggable="false">
+      </div>
+    </div>
+    <div id="login-open" hidden>
+      <p>Connected as <b id="me"></b></p>
+      <button id="logout" class="danger" type="button">Log out</button>
+    </div>
+    <p id="login-error" class="error" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Post</h2>
+    <form id="post">
+      <div class="row">
+        <label><input type="radio" name="kind" value="video" checked> Video</label>
+        <label><input type="radio" name="kind" value="photos"> Photos (up to 35)</label>
+      </div>
+      <input type="file" name="files" multiple required>
+      <input name="title" maxlength="90" placeholder="Title (photos only)">
+      <textarea name="caption" rows="3" maxlength="2200" placeholder="Caption, #hashtags"></textarea>
+      <div class="row">
+        <input name="sound" placeholder="Search a sound (optional)">
+        <label><input type="checkbox" name="auto_sound" value="1"> Let TikTok pick a sound</label>
+        <label><input type="checkbox" name="dry_run" value="1"> Dry run</label>
+      </div>
+      <button type="submit">Publish</button>
+      <p id="post-result" class="muted"></p>
+    </form>
+  </section>
+
+  <section class="card chat">
+    <h2>Messages <button id="reload-chats" class="ghost small" type="button">Reload</button></h2>
+    <div class="chat-grid">
+      <ul id="chats"></ul>
+      <div class="thread">
+        <div id="thread-head" class="muted">Pick a chat</div>
+        <ul id="messages"></ul>
+        <form id="send" hidden>
+          <textarea name="text" rows="2" placeholder="Write a message"></textarea>
+          <button type="submit">Send</button>
+        </form>
+        <p id="send-error" class="error" hidden></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Events</h2>
+    <ul id="events" class="log"></ul>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
