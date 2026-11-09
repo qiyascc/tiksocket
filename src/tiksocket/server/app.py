@@ -283,6 +283,175 @@ async def send(request):
     return web.json_response(result.to_dict())
 
 
+def _flag(value) -> bool:
+    return str(value).lower() in ("1", "true", "on", "yes")
+
+
+def _int(request: web.Request, name: str, default: int, top: int) -> int:
+    raw = request.query.get(name, "")
+    return max(1, min(int(raw), top)) if raw.isdigit() else default
+
+
+async def user_info(request):
+    found = await _account(request).sock.get_user(request.match_info["user"])
+    return web.json_response(found.to_dict())
+
+
+async def user_people(request):
+    sock = _account(request).sock
+    method = sock.followers if request.match_info["list"] == "followers" else sock.following
+    page = await method(request.match_info["user"], request.query.get("cursor", "0"), _int(request, "count", 30, 50))
+    return web.json_response(page.to_dict())
+
+
+async def user_relation(request):
+    return web.json_response(await _account(request).sock.relationship(request.match_info["user"]))
+
+
+async def user_posts(request):
+    rows = await _account(request).sock.user_posts(request.match_info["user"], _int(request, "limit", 30, 200))
+    return web.json_response({"posts": payload(rows)})
+
+
+USER_ACTIONS = {("POST", "follow"): "follow", ("DELETE", "follow"): "unfollow", ("POST", "block"): "block",
+                ("DELETE", "block"): "unblock", ("DELETE", "follower"): "remove_follower"}
+
+
+async def user_action(request):
+    name = USER_ACTIONS.get((request.method, request.match_info["action"]))
+    if name is None:
+        raise NotFound("unknown action")
+    result = await getattr(_account(request).sock, name)(request.match_info["user"])
+    return web.json_response(result.to_dict())
+
+
+async def search(request):
+    sock = _account(request).sock
+    query, cursor = request.query.get("q", ""), request.query.get("cursor", "0")
+    page = await (sock.search_users if request.match_info["kind"] == "users" else sock.search_posts)(query, cursor)
+    return web.json_response(page.to_dict())
+
+
+async def hashtag(request):
+    sock = _account(request).sock
+    tag = await sock.hashtag(request.match_info["tag"])
+    count = _int(request, "posts", 0, 100) if request.query.get("posts") else 0
+    rows = await sock.hashtag_posts(tag.name, count) if count else []
+    return web.json_response({"hashtag": tag.to_dict(), "posts": payload(rows)})
+
+
+async def feed(request):
+    rows = await _account(request).sock.feed(request.query.get("kind", "foryou"), _int(request, "count", 10, 30))
+    return web.json_response({"posts": payload(rows)})
+
+
+async def notifications(request):
+    rows = await _account(request).sock.notifications(_int(request, "count", 30, 50), request.query.get("kind", ""))
+    return web.json_response({"notifications": payload(rows)})
+
+
+def _ref(request: web.Request, data: dict | None = None) -> str:
+    ref = (data or {}).get("post") or request.query.get("post", "")
+    if not ref:
+        raise BadInput("post is required, a link or an id")
+    return str(ref)
+
+
+async def post_info(request):
+    return web.json_response((await _account(request).sock.get_post(_ref(request))).to_dict())
+
+
+async def post_comments(request):
+    rows = await _account(request).sock.comments(_ref(request), _int(request, "limit", 50, 500))
+    return web.json_response({"comments": payload(rows)})
+
+
+async def post_download(request):
+    blob = await _account(request).sock.download(_ref(request))
+    return web.Response(body=blob, content_type="video/mp4")
+
+
+POST_ACTIONS = {"like": "like", "unlike": "unlike", "favorite": "favorite", "unfavorite": "unfavorite",
+                "repost": "repost", "unrepost": "undo_repost", "delete": "delete_post", "pin": "pin_post",
+                "unpin": "unpin_post"}
+
+
+async def post_action(request):
+    data = await _body(request)
+    sock = _account(request).sock
+    ref = _ref(request, data)
+    action = request.match_info["action"]
+    if action in POST_ACTIONS:
+        result = await getattr(sock, POST_ACTIONS[action])(ref)
+    elif action == "comment":
+        result = await sock.comment(ref, str(data.get("text") or ""))
+    elif action == "reply":
+        result = await sock.reply_comment(ref, str(data.get("comment_id") or ""), str(data.get("text") or ""))
+    elif action == "like-comment":
+        result = await sock.like_comment(ref, str(data.get("comment_id") or ""))
+    elif action == "delete-comment":
+        result = await sock.delete_comment(ref, str(data.get("comment_id") or ""))
+    elif action == "settings":
+        comments = data.get("comments")
+        result = await sock.post_settings(ref, str(data.get("who_can_view") or ""),
+                                          None if comments is None else _flag(comments))
+    elif action == "share":
+        result = await sock.share_to_chat(ref, str(data.get("username") or ""))
+    else:
+        raise NotFound("unknown action")
+    return web.json_response(result.to_dict())
+
+
+async def profile_update(request):
+    data = await _body(request)
+    avatar = data.get("avatar")
+    if avatar:
+        try:
+            avatar = base64.b64decode(str(avatar).split(",", 1)[-1], validate=True)
+        except ValueError as exc:
+            raise BadInput("avatar must be base64 image data") from exc
+    found = await _account(request).sock.update_profile(nickname=data.get("name"), username=data.get("username"),
+                                                         bio=data.get("bio"), avatar=avatar or None)
+    return web.json_response(found.to_dict())
+
+
+async def privacy(request):
+    data = await _body(request)
+    result = await _account(request).sock.set_private(_flag(data.get("private")))
+    return web.json_response(result.to_dict())
+
+
+async def chat_new(request):
+    data = await _body(request)
+    chat_id, result = await _account(request).sock.start_chat(str(data.get("username") or ""), str(data.get("text") or ""),
+                                                              str(data.get("client_id") or "")[:64])
+    return web.json_response({"chat_id": chat_id, **result.to_dict()})
+
+
+async def chat_requests(request):
+    return web.json_response({"requests": payload(await _account(request).sock.message_requests())})
+
+
+async def chat_request_answer(request):
+    sock = _account(request).sock
+    chat = request.match_info["chat"]
+    await (sock.accept_request(chat) if request.method == "POST" else sock.delete_request(chat))
+    return web.json_response({"ok": True})
+
+
+async def message_react(request):
+    data = await _body(request)
+    await _account(request).sock.react(request.match_info["chat"], request.match_info["message"], str(data.get("emoji") or ""))
+    return web.json_response({"ok": True})
+
+
+async def message_reply(request):
+    data = await _body(request)
+    result = await _account(request).sock.reply_to(request.match_info["chat"], request.match_info["message"],
+                                                   str(data.get("text") or ""), str(data.get("client_id") or "")[:64])
+    return web.json_response(result.to_dict())
+
+
 async def events(request):
     manager = request.app[MANAGER]
     wanted = request.query.get("account", "")
@@ -359,6 +528,28 @@ def build_app(manager: Manager, token: str = "") -> web.Application:
     r.add_get(f"{base}/chats", chats)
     r.add_get(f"{base}/chats/{{chat}}/messages", messages)
     r.add_post(f"{base}/chats/{{chat}}/messages", send)
+    r.add_get(f"{base}/users/{{user}}", user_info)
+    r.add_get(f"{base}/users/{{user}}/relation", user_relation)
+    r.add_get(f"{base}/users/{{user}}/posts", user_posts)
+    r.add_get(f"{base}/users/{{user}}/{{list:followers|following}}", user_people)
+    for verb in ("POST", "DELETE"):
+        r.add_route(verb, f"{base}/users/{{user}}/{{action}}", user_action)
+    r.add_get(f"{base}/search/{{kind:users|posts}}", search)
+    r.add_get(f"{base}/hashtags/{{tag}}", hashtag)
+    r.add_get(f"{base}/feed", feed)
+    r.add_get(f"{base}/notifications", notifications)
+    r.add_get(f"{base}/post", post_info)
+    r.add_get(f"{base}/post/comments", post_comments)
+    r.add_get(f"{base}/post/download", post_download)
+    r.add_post(f"{base}/post/{{action}}", post_action)
+    r.add_patch(f"{base}/profile", profile_update)
+    r.add_post(f"{base}/privacy", privacy)
+    r.add_post(f"{base}/chats", chat_new)
+    r.add_get(f"{base}/requests", chat_requests)
+    r.add_post(f"{base}/requests/{{chat}}", chat_request_answer)
+    r.add_delete(f"{base}/requests/{{chat}}", chat_request_answer)
+    r.add_post(f"{base}/chats/{{chat}}/messages/{{message}}/react", message_react)
+    r.add_post(f"{base}/chats/{{chat}}/messages/{{message}}/reply", message_reply)
     r.add_get("/api/events", events)
     r.add_get("/api/ws", socket_events)
     return app

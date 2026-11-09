@@ -94,6 +94,124 @@
   </section>
 
   <section class="card">
+    <h2>People</h2>
+    <form id="people" class="row">
+      <input name="user" placeholder="@username or profile link" required>
+      <button type="submit">Open</button>
+    </form>
+    <div id="person" class="person" hidden>
+      <img id="p-avatar" alt="">
+      <div class="grow">
+        <b id="p-name"></b>
+        <p id="p-bio" class="muted"></p>
+        <p id="p-stats" class="muted"></p>
+      </div>
+    </div>
+    <div id="person-actions" class="row" hidden>
+      <button data-user="POST follow" type="button">Follow</button>
+      <button data-user="DELETE follow" class="ghost" type="button">Unfollow</button>
+      <button data-user="followers" class="ghost" type="button">Followers</button>
+      <button data-user="following" class="ghost" type="button">Following</button>
+      <button data-user="posts" class="ghost" type="button">Posts</button>
+      <button data-user="DELETE follower" class="ghost" type="button">Remove follower</button>
+      <button data-user="POST block" class="danger" type="button">Block</button>
+      <button data-user="DELETE block" class="ghost" type="button">Unblock</button>
+    </div>
+    <form id="dm-new" class="row" hidden>
+      <input name="text" placeholder="Send a message or a message request">
+      <button type="submit" class="ghost">Message</button>
+    </form>
+    <form id="find-users" class="row">
+      <input name="q" placeholder="Search users">
+      <button type="submit" class="ghost">Search</button>
+    </form>
+    <ul id="people-list" class="list"></ul>
+    <p id="people-error" class="error" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Post actions</h2>
+    <form id="post-ref" class="row">
+      <input name="post" placeholder="Post link like https://www.tiktok.com/@user/video/123" required>
+      <button type="submit">Load</button>
+    </form>
+    <div id="post-view" class="person" hidden>
+      <img id="pv-cover" alt="">
+      <div class="grow">
+        <b id="pv-author"></b>
+        <p id="pv-caption" class="muted"></p>
+        <p id="pv-stats" class="muted"></p>
+      </div>
+    </div>
+    <div id="post-actions" class="row" hidden>
+      <button data-post="like" type="button">Like</button>
+      <button data-post="unlike" class="ghost" type="button">Unlike</button>
+      <button data-post="favorite" class="ghost" type="button">Favorite</button>
+      <button data-post="unfavorite" class="ghost" type="button">Unfavorite</button>
+      <button data-post="repost" class="ghost" type="button">Repost</button>
+      <button data-post="unrepost" class="ghost" type="button">Undo repost</button>
+      <button data-post="comments" class="ghost" type="button">Comments</button>
+      <a id="pv-download" class="button ghost" href="#">Download</a>
+    </div>
+    <div id="own-actions" class="row" hidden>
+      <select id="pv-who" aria-label="Who can see this post">
+        <option value="">Keep visibility</option>
+        <option value="everyone">Everyone</option>
+        <option value="friends">Friends</option>
+        <option value="only_me">Only me</option>
+      </select>
+      <select id="pv-comments" aria-label="Comments">
+        <option value="">Keep comments</option>
+        <option value="1">Comments on</option>
+        <option value="0">Comments off</option>
+      </select>
+      <button data-post="settings" class="ghost" type="button">Save settings</button>
+      <button data-post="pin" class="ghost" type="button">Pin</button>
+      <button data-post="unpin" class="ghost" type="button">Unpin</button>
+      <button data-post="delete" class="danger" type="button">Delete post</button>
+    </div>
+    <form id="comment-form" class="row" hidden>
+      <input name="text" maxlength="150" placeholder="Write a comment">
+      <input type="hidden" name="reply">
+      <button type="submit">Comment</button>
+    </form>
+    <ul id="comment-list" class="list"></ul>
+    <p id="post-error" class="error" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Profile</h2>
+    <form id="profile">
+      <input name="name" maxlength="30" placeholder="Name (leave empty to keep)">
+      <input name="username" maxlength="30" placeholder="Username (leave empty to keep)">
+      <textarea name="bio" rows="2" maxlength="80" placeholder="Bio (leave empty to keep)"></textarea>
+      <label class="muted">Profile photo <input type="file" name="avatar" accept="image/*"></label>
+      <div class="row">
+        <button type="submit">Save profile</button>
+        <button id="go-private" class="ghost" type="button">Make private</button>
+        <button id="go-public" class="ghost" type="button">Make public</button>
+      </div>
+      <p id="profile-result" class="muted"></p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Explore</h2>
+    <div class="row">
+      <button data-feed="foryou" class="ghost" type="button">For You</button>
+      <button data-feed="explore" class="ghost" type="button">Explore</button>
+      <button id="load-notices" class="ghost" type="button">Notifications</button>
+      <button id="load-requests" class="ghost" type="button">Message requests</button>
+    </div>
+    <form id="find-posts" class="row">
+      <input name="q" placeholder="Search videos or #hashtag">
+      <button type="submit" class="ghost">Search</button>
+    </form>
+    <ul id="explore-list" class="list"></ul>
+    <p id="explore-error" class="error" hidden></p>
+  </section>
+
+  <section class="card">
     <h2>Events</h2>
     <ul id="events" class="log"></ul>
   </section>

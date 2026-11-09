@@ -146,6 +146,160 @@
     } catch (err) { fail($("#send-error"), err); }
   };
 
+  const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
+  const num = (n) => Intl.NumberFormat("en", { notation: "compact" }).format(n || 0);
+  const busy = async (button, work) => { if (button) button.disabled = true; try { return await work(); } finally { if (button) button.disabled = false; } };
+  let person = "";
+  let postRef = "";
+  const userRow = (u) => el("li", {}, u.avatar ? el("img", { src: u.avatar, alt: "" }) : "",
+    el("div", { className: "grow" }, el("b", { textContent: `@${u.username}` }), el("small", { textContent: `${u.nickname} · ${num(u.followers)} followers` })),
+    el("button", { type: "button", className: "ghost small", textContent: "Open", onclick: () => openPerson(u.username) }));
+  const postRow = (p) => el("li", {}, p.cover ? el("img", { src: p.cover, alt: "" }) : "",
+    el("div", { className: "grow" }, el("b", { textContent: `@${p.author} · ${p.kind}` }), el("small", { textContent: `${num(p.likes)} likes · ${num(p.comments)} comments · ${p.caption}` })),
+    el("button", { type: "button", className: "ghost small", textContent: "Open", onclick: () => openPost(p.url || p.id) }));
+
+  const openPerson = async (name) => {
+    fail($("#people-error"), null);
+    try {
+      const u = await api(`/users/${encodeURIComponent(name)}`);
+      person = u.username;
+      $("#person").hidden = $("#person-actions").hidden = $("#dm-new").hidden = false;
+      $("#p-avatar").src = u.avatar || "";
+      $("#p-name").textContent = `${u.nickname} @${u.username}${u.verified ? " ✓" : ""}${u.private ? " (private)" : ""}`;
+      $("#p-bio").textContent = u.bio || "";
+      $("#p-stats").textContent = `${num(u.followers)} followers · ${num(u.following)} following · ${num(u.likes)} likes · ${u.is_following ? "you follow" : "not following"}`;
+    } catch (e) { fail($("#people-error"), e); }
+  };
+  $("#people").onsubmit = (e) => { e.preventDefault(); openPerson(e.target.user.value); };
+  $("#find-users").onsubmit = async (e) => {
+    e.preventDefault();
+    fail($("#people-error"), null);
+    try { const page = await api(`/search/users?q=${encodeURIComponent(e.target.q.value)}`); $("#people-list").replaceChildren(...page.items.map(userRow)); }
+    catch (err) { fail($("#people-error"), err); }
+  };
+  document.querySelectorAll("[data-user]").forEach((b) => b.onclick = () => busy(b, async () => {
+    fail($("#people-error"), null);
+    const [verb, action] = b.dataset.user.includes(" ") ? b.dataset.user.split(" ") : ["GET", b.dataset.user];
+    if (verb === "POST" && action === "block" && !confirm(`Block @${person}?`)) return;
+    try {
+      const base = `/users/${encodeURIComponent(person)}`;
+      if (verb === "GET" && action === "posts") { const { posts } = await api(`${base}/posts`); $("#people-list").replaceChildren(...posts.map(postRow)); return; }
+      if (verb === "GET") { const page = await api(`${base}/${action}`); $("#people-list").replaceChildren(...page.items.map(userRow)); return; }
+      const res = await api(`${base}/${action}`, { method: verb });
+      $("#p-stats").textContent = `${res.action}: ${res.changed ? "done" : "already so"}`;
+    } catch (err) { fail($("#people-error"), err); }
+  }));
+  $("#dm-new").onsubmit = async (e) => {
+    e.preventDefault();
+    fail($("#people-error"), null);
+    try {
+      const res = await api("/chats", { method: "POST", body: JSON.stringify({ username: person, text: e.target.text.value, client_id: crypto.randomUUID() }) });
+      e.target.text.value = "";
+      $("#p-stats").textContent = `Sent${res.chat_id ? `, chat ${res.chat_id}` : ""}`;
+      loadChats();
+    } catch (err) { fail($("#people-error"), err); }
+  };
+
+  const openPost = async (ref) => {
+    fail($("#post-error"), null);
+    try {
+      const p = await api(`/post?post=${encodeURIComponent(ref)}`);
+      postRef = p.url || ref;
+      $("#post-ref").post.value = postRef;
+      $("#post-view").hidden = $("#post-actions").hidden = $("#comment-form").hidden = false;
+      $("#own-actions").hidden = !(p.author && $("#who").textContent === `@${p.author}`);
+      $("#pv-cover").src = p.cover || "";
+      $("#pv-author").textContent = `@${p.author} · ${p.kind}${p.private ? " · private" : ""}`;
+      $("#pv-caption").textContent = p.caption;
+      $("#pv-stats").textContent = `${num(p.plays)} plays · ${num(p.likes)} likes${p.liked ? " (you)" : ""} · ${num(p.comments)} comments · ${num(p.saves)} saves${p.saved ? " (you)" : ""} · ${p.music}`;
+      $("#pv-download").href = `/api/accounts/${encodeURIComponent(account)}/post/download?post=${encodeURIComponent(postRef)}&token=${encodeURIComponent(token)}`;
+    } catch (e) { fail($("#post-error"), e); }
+  };
+  $("#post-ref").onsubmit = (e) => { e.preventDefault(); openPost(e.target.post.value); };
+  const loadComments = async () => {
+    const { comments } = await api(`/post/comments?post=${encodeURIComponent(postRef)}`);
+    $("#comment-list").replaceChildren(...comments.map((c) => el("li", {},
+      el("div", { className: "grow" }, el("b", { textContent: `@${c.author}` }), el("small", { textContent: `${c.text} · ${num(c.likes)} likes` })),
+      el("button", { type: "button", className: "ghost small", textContent: "Reply", onclick: () => { $("#comment-form").reply.value = c.id; $("#comment-form").text.placeholder = `Reply to @${c.author}`; $("#comment-form").text.focus(); } }),
+      el("button", { type: "button", className: "ghost small", textContent: "Like", onclick: (ev) => busy(ev.target, () => postAct("like-comment", { comment_id: c.id })) }),
+      c.author && $("#who").textContent === `@${c.author}` ? el("button", { type: "button", className: "ghost small", textContent: "Delete", onclick: (ev) => busy(ev.target, () => postAct("delete-comment", { comment_id: c.id }).then(loadComments)) }) : "")));
+  };
+  const postAct = async (action, extra = {}) => {
+    fail($("#post-error"), null);
+    try {
+      const res = await api(`/post/${action}`, { method: "POST", body: JSON.stringify({ post: postRef, ...extra }) });
+      $("#pv-stats").textContent = res.action ? `${res.action}: ${res.changed === false ? "already so" : "done"}` : "Done";
+      return res;
+    } catch (err) { fail($("#post-error"), err); return null; }
+  };
+  document.querySelectorAll("[data-post]").forEach((b) => b.onclick = () => busy(b, async () => {
+    const action = b.dataset.post;
+    if (action === "comments") { await loadComments().catch((err) => fail($("#post-error"), err)); return; }
+    if (action === "delete" && !confirm("Delete this post for good?")) return;
+    if (action === "settings") {
+      const who = $("#pv-who").value;
+      const comments = $("#pv-comments").value;
+      await postAct("settings", { who_can_view: who, ...(comments ? { comments: comments === "1" } : {}) });
+      return;
+    }
+    await postAct(action);
+  }));
+  $("#comment-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const text = form.text.value.trim();
+    if (!text) return;
+    const res = await postAct(form.reply.value ? "reply" : "comment", { text, comment_id: form.reply.value });
+    if (res) { form.text.value = ""; form.reply.value = ""; form.text.placeholder = "Write a comment"; loadComments().catch(() => {}); }
+  };
+
+  $("#profile").onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {};
+    for (const name of ["name", "username", "bio"]) if (form[name].value.trim()) body[name] = form[name].value.trim();
+    const file = form.avatar.files[0];
+    if (file) body.avatar = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(file); });
+    if (!Object.keys(body).length) { $("#profile-result").textContent = "Nothing to change"; return; }
+    $("#profile-result").textContent = "Saving...";
+    try { const u = await api("/profile", { method: "PATCH", body: JSON.stringify(body) }); $("#profile-result").textContent = `Saved: @${u.username} ${u.nickname}`; refresh(); }
+    catch (err) { $("#profile-result").textContent = `Error: ${err.message}`; }
+  };
+  const privacy = (value) => async (e) => busy(e.target, async () => {
+    try { const res = await api("/privacy", { method: "POST", body: JSON.stringify({ private: value }) }); $("#profile-result").textContent = `Account is ${value ? "private" : "public"}${res.changed ? "" : " already"}`; }
+    catch (err) { $("#profile-result").textContent = `Error: ${err.message}`; }
+  });
+  $("#go-private").onclick = privacy(true);
+  $("#go-public").onclick = privacy(false);
+
+  const explore = async (work) => { fail($("#explore-error"), null); try { await work(); } catch (err) { fail($("#explore-error"), err); } };
+  document.querySelectorAll("[data-feed]").forEach((b) => b.onclick = () => busy(b, () => explore(async () => {
+    const { posts } = await api(`/feed?kind=${b.dataset.feed}&count=12`);
+    $("#explore-list").replaceChildren(...posts.map(postRow));
+  })));
+  $("#find-posts").onsubmit = (e) => { e.preventDefault(); explore(async () => {
+    const q = e.target.q.value.trim();
+    if (q.startsWith("#")) {
+      const res = await api(`/hashtags/${encodeURIComponent(q.slice(1))}?posts=20`);
+      $("#explore-list").replaceChildren(el("li", {}, el("b", { textContent: `#${res.hashtag.name} · ${num(res.hashtag.views)} views` })), ...res.posts.map(postRow));
+      return;
+    }
+    const page = await api(`/search/posts?q=${encodeURIComponent(q)}`);
+    $("#explore-list").replaceChildren(...page.items.map(postRow));
+  }); };
+  $("#load-notices").onclick = (e) => busy(e.target, () => explore(async () => {
+    const { notifications } = await api("/notifications?count=30");
+    $("#explore-list").replaceChildren(...notifications.map((n) => el("li", {}, el("div", { className: "grow" },
+      el("b", { textContent: `${n.kind} · ${n.users.map((u) => "@" + u).join(", ")}` }),
+      el("small", { textContent: `${new Date(n.created * 1000).toLocaleString()} ${n.text}` })))));
+  }));
+  $("#load-requests").onclick = (e) => busy(e.target, () => explore(async () => {
+    const { requests } = await api("/requests");
+    $("#explore-list").replaceChildren(...requests.map((r) => el("li", {}, el("div", { className: "grow" }, el("b", { textContent: r.name }), el("small", { textContent: r.preview })),
+      el("button", { type: "button", className: "small", textContent: "Accept", onclick: (ev) => busy(ev.target, () => explore(() => api(`/requests/${encodeURIComponent(r.id)}`, { method: "POST" }).then(() => $("#load-requests").click()))) }),
+      el("button", { type: "button", className: "ghost small", textContent: "Delete", onclick: (ev) => busy(ev.target, () => explore(() => api(`/requests/${encodeURIComponent(r.id)}`, { method: "DELETE" }).then(() => $("#load-requests").click()))) }))));
+  }));
+
   const stream = () => {
     const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     es.onopen = () => $("#live").classList.add("on");

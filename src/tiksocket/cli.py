@@ -65,12 +65,188 @@ def build_parser() -> argparse.ArgumentParser:
     listen.add_argument("--interval", type=float, default=25.0)
     listen.add_argument("--history", action="store_true", help="also print messages already in the inbox")
 
+    add_web_commands(sub)
+
     serve = sub.add_parser("serve", help="run the web UI and REST API")
     serve.add_argument("--host", default=os.environ.get("TIKSOCKET_HOST", "127.0.0.1"))
     serve.add_argument("--port", type=int, default=int(os.environ.get("TIKSOCKET_PORT") or DEFAULT_PORT))
     serve.add_argument("--token", default=os.environ.get("TIKSOCKET_TOKEN", ""), help="API token, generated if empty")
     serve.add_argument("--listen", action="store_true", help="poll messages of every logged in account")
     return parser
+
+
+def add_web_commands(sub) -> None:
+    def cmd(name, text, *args):
+        item = sub.add_parser(name, help=text)
+        for arg in args:
+            if isinstance(arg, tuple):
+                item.add_argument(*arg[0], **arg[1])
+            else:
+                item.add_argument(arg)
+        return item
+
+    def opt(*flags, **kw):
+        return flags, kw
+
+    cmd("user", "show a TikTok profile", "username")
+    cmd("search-users", "search TikTok users", "query", opt("--cursor", default="0"))
+    for name in ("followers", "following"):
+        cmd(name, f"list {name} of a user (yours by default)", opt("username", nargs="?", default=""),
+            opt("--cursor", default="0"), opt("--count", type=int, default=30))
+    cmd("relation", "show whether you follow a user", "username")
+    for name, text in (("follow", "follow a user"), ("unfollow", "unfollow a user"), ("block", "block a user"),
+                       ("unblock", "unblock a user"), ("remove-follower", "remove someone from your followers")):
+        cmd(name, text, "username")
+    cmd("post-info", "show a post with its stats", "post")
+    cmd("posts", "list posts of a user (yours by default)", opt("username", nargs="?", default=""),
+        opt("--limit", type=int, default=30))
+    cmd("comments", "list comments of a post", "post", opt("--limit", type=int, default=50))
+    for name, text in (("like", "like a post"), ("unlike", "remove your like"), ("favorite", "add a post to Favorites"),
+                       ("unfavorite", "remove a post from Favorites"), ("repost", "repost a post"),
+                       ("unrepost", "undo a repost"), ("delete-post", "delete your own post"),
+                       ("pin", "pin your own post"), ("unpin", "unpin your own post")):
+        cmd(name, text, "post")
+    cmd("comment", "comment on a post", "post", "text")
+    cmd("reply", "reply to a comment", "post", "comment_id", "text")
+    cmd("like-comment", "like a comment", "post", "comment_id")
+    cmd("delete-comment", "delete your own comment", "post", "comment_id")
+    cmd("post-settings", "change who can see your post and comments", "post",
+        opt("--who", choices=["everyone", "friends", "only_me"], default=""),
+        opt("--comments", choices=["on", "off"], default=""))
+    cmd("search-posts", "search TikTok videos and photo posts", "query", opt("--cursor", default="0"))
+    cmd("hashtag", "show a hashtag and its posts", "name", opt("--posts", type=int, default=0))
+    cmd("feed", "read the For You or Explore feed", opt("--kind", choices=["foryou", "explore"], default="foryou"),
+        opt("--count", type=int, default=10))
+    cmd("notifications", "list your notifications", opt("--count", type=int, default=30),
+        opt("--kind", choices=["", "like", "comment", "follow", "mention", "system"], default=""))
+    cmd("download", "download a video", "post", opt("-o", "--output", default=""))
+    profile = cmd("profile", "change your name, username, bio or photo")
+    profile.add_argument("--name")
+    profile.add_argument("--username")
+    profile.add_argument("--bio")
+    profile.add_argument("--avatar", help="image file for the profile photo")
+    cmd("privacy", "make your account private or public", opt("mode", choices=["private", "public"]))
+    cmd("share", "share a post to a chat", "post", "username")
+    cmd("new-chat", "message a user, this sends a message request if you are not friends", "username", "text",
+        opt("--client-id", default=""))
+    cmd("requests", "list message requests")
+    cmd("accept-request", "accept a message request", "chat_id")
+    cmd("delete-request", "delete a message request", "chat_id")
+    cmd("react", "react to a message with an emoji", "chat_id", "message_id", "emoji")
+    cmd("reply-message", "reply to a specific message", "chat_id", "message_id", "text", opt("--client-id", default=""))
+
+
+def _stamp(value: int) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(value, timezone.utc).strftime("%Y-%m-%d %H:%M") if value else ""
+
+
+def _user_line(u) -> str:
+    return f"@{u.username}  {u.nickname}  followers {u.followers}" + ("  (following)" if u.is_following else "")
+
+
+def _post_line(p) -> str:
+    return f"{p.url}  {p.kind}  likes {p.likes} comments {p.comments} plays {p.plays}  {p.caption[:60]}"
+
+
+async def run_web_command(args, sock: TikSocket) -> bool:
+    c = args.command
+    simple = {"follow": sock.follow, "unfollow": sock.unfollow, "block": sock.block, "unblock": sock.unblock,
+              "remove-follower": sock.remove_follower, "like": sock.like, "unlike": sock.unlike,
+              "favorite": sock.favorite, "unfavorite": sock.unfavorite, "repost": sock.repost,
+              "unrepost": sock.undo_repost, "delete-post": sock.delete_post, "pin": sock.pin_post,
+              "unpin": sock.unpin_post}
+    if c in simple:
+        result = await simple[c](getattr(args, "username", None) or getattr(args, "post", ""))
+        out(args, result, f"{result.action}: {'done' if result.changed else 'already so'} ({result.target})")
+        return True
+    if c == "user":
+        u = await sock.get_user(args.username)
+        out(args, u, f"{_user_line(u)}\nfollowing {u.following}  likes {u.likes}  videos {u.videos}\n{u.bio}")
+    elif c == "search-users":
+        page = await sock.search_users(args.query, args.cursor)
+        out(args, page, "\n".join(_user_line(u) for u in page.items) + f"\nnext cursor: {page.cursor}")
+    elif c in ("followers", "following"):
+        method = sock.followers if c == "followers" else sock.following
+        page = await method(args.username, args.cursor, args.count)
+        out(args, page, "\n".join(_user_line(u) for u in page.items) + f"\nnext cursor: {page.cursor}")
+    elif c == "relation":
+        data = await sock.relationship(args.username)
+        out(args, data, f"@{data['username']}: {'following' if data['following'] else 'not following'}"
+                        + (", friends" if data["friends"] else ""))
+    elif c == "post-info":
+        p = await sock.get_post(args.post)
+        out(args, p, f"{_post_line(p)}\nmusic: {p.music}  created {_stamp(p.created)}")
+    elif c == "posts":
+        rows = await sock.user_posts(args.username, args.limit)
+        out(args, rows, "\n".join(_post_line(p) for p in rows) or "No posts")
+    elif c == "comments":
+        rows = await sock.comments(args.post, args.limit)
+        out(args, rows, "\n".join(f"{m.id}  @{m.author}: {m.text}  ({m.likes} likes)" for m in rows) or "No comments")
+    elif c == "comment":
+        m = await sock.comment(args.post, args.text)
+        out(args, m, f"Commented, id {m.id}")
+    elif c == "reply":
+        m = await sock.reply_comment(args.post, args.comment_id, args.text)
+        out(args, m, f"Replied, id {m.id}")
+    elif c in ("like-comment", "delete-comment"):
+        method = sock.like_comment if c == "like-comment" else sock.delete_comment
+        result = await method(args.post, args.comment_id)
+        out(args, result, f"{result.action}: {'done' if result.changed else 'already so'}")
+    elif c == "post-settings":
+        comments = None if not args.comments else args.comments == "on"
+        result = await sock.post_settings(args.post, args.who, comments)
+        out(args, result, "Post settings saved")
+    elif c == "search-posts":
+        page = await sock.search_posts(args.query, args.cursor)
+        out(args, page, "\n".join(_post_line(p) for p in page.items) + f"\nnext cursor: {page.cursor}")
+    elif c == "hashtag":
+        tag = await sock.hashtag(args.name)
+        rows = await sock.hashtag_posts(args.name, args.posts) if args.posts else []
+        out(args, {"hashtag": tag, "posts": rows},
+            f"#{tag.name}  views {tag.views}  videos {tag.videos}\n" + "\n".join(_post_line(p) for p in rows))
+    elif c == "feed":
+        rows = await sock.feed(args.kind, args.count)
+        out(args, rows, "\n".join(_post_line(p) for p in rows))
+    elif c == "notifications":
+        rows = await sock.notifications(args.count, args.kind)
+        out(args, rows, "\n".join(f"{_stamp(n.created)}  {n.kind}  {', '.join('@' + u for u in n.users)}  {n.text[:60]}"
+                                   for n in rows) or "No notifications")
+    elif c == "download":
+        target = await sock.download(args.post, args.output or None)
+        if args.output:
+            out(args, {"file": str(target)}, f"Saved {target}")
+        else:
+            sys.stdout.buffer.write(target)
+    elif c == "profile":
+        u = await sock.update_profile(nickname=args.name, username=args.username, bio=args.bio, avatar=args.avatar)
+        out(args, u, f"Profile saved: {_user_line(u)}")
+    elif c == "privacy":
+        result = await sock.set_private(args.mode == "private")
+        out(args, result, f"Account is {args.mode}" + ("" if result.changed else " already"))
+    elif c == "share":
+        result = await sock.share_to_chat(args.post, args.username)
+        out(args, result, f"Shared to @{args.username}")
+    elif c == "new-chat":
+        chat_id, result = await sock.start_chat(args.username, args.text, args.client_id)
+        out(args, {"chat_id": chat_id, **result.to_dict()}, f"Sent to @{args.username}, chat {chat_id}")
+    elif c == "requests":
+        rows = await sock.message_requests()
+        out(args, rows, "\n".join(f"{r.id}  {r.name}  {r.preview}" for r in rows) or "No message requests")
+    elif c in ("accept-request", "delete-request"):
+        method = sock.accept_request if c == "accept-request" else sock.delete_request
+        await method(args.chat_id)
+        out(args, {"ok": True}, "Done")
+    elif c == "react":
+        await sock.react(args.chat_id, args.message_id, args.emoji)
+        out(args, {"ok": True}, "Reacted")
+    elif c == "reply-message":
+        result = await sock.reply_to(args.chat_id, args.message_id, args.text, args.client_id)
+        out(args, result, f"Replied, id {result.id}")
+    else:
+        return False
+    return True
 
 
 def dump(value) -> object:
@@ -196,6 +372,8 @@ async def run(args) -> int:
         if args.command == "send":
             result = await sock.send_message(args.chat_id, args.text, args.client_id)
             out(args, result, f"Sent, id {result.id}" + (" (waiting for TikTok)" if result.pending else ""))
+            return 0
+        if await run_web_command(args, sock):
             return 0
         if args.command == "listen":
             def show(event):

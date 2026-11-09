@@ -43,3 +43,13 @@ form { display: grid; gap: 10px; }
 #messages img { max-width: 160px; border-radius: 8px; display: block; }
 .log { list-style: none; margin: 0; padding: 0; font: 12px/1.5 ui-monospace, monospace; max-height: 260px; overflow: auto; }
 .log li { border-bottom: 1px solid var(--line); padding: 4px 0; overflow-wrap: anywhere; }
+.person { display: flex; gap: 12px; align-items: flex-start; }
+.person img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--bg); flex: none; }
+.person p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 360px; overflow: auto; }
+.list li { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--bg); min-width: 0; }
+.list li .grow { min-width: 0; display: grid; gap: 2px; }
+.list li small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list li img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
+.list li button { flex: none; }
+a.button { display: inline-flex; align-items: center; border-radius: 10px; padding: 9px 14px; font-weight: 600; text-decoration: none; color: var(--ink); border: 1px solid var(--line); }
