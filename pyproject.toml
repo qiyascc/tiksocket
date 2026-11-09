@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tiksocket"
-version = "0.1.1"
+version = "0.2.0"
 description = "Baileys alternative for TikTok: QR login, video and photo posting with music, DMs, CLI, REST API and web UI, built on Playwright"
 readme = "README.md"
 license = "MIT"

@@ -6,7 +6,7 @@
 ![Playwright](https://img.shields.io/badge/built%20on-Playwright-2EAD33)
 
 **TikSocket** is an unofficial TikTok library that works the way [Baileys](https://github.com/WhiskeySockets/Baileys) works for WhatsApp:
-you scan a QR code once, the session is saved, and from then on your code can **post videos, post photo carousels with music, read and send direct messages** and listen to new messages as events.
+you scan a QR code once, the session is saved, and from then on your code can **post videos and photo carousels with music, read and send direct messages, follow people, like, comment, repost, edit your profile, search, read feeds and notifications** and listen to new messages as events.
 
 It drives a real Chromium in the background through Playwright, so it uses the same TikTok web app a person uses. No developer account, no app review, no official API keys.
 
@@ -25,6 +25,7 @@ tiksocket login
 ## Contents
 
 - [Features](#features)
+- [What TikTok web allows](#what-tiktok-web-allows)
 - [Install](#install)
 - [Quick start: CLI](#quick-start-cli)
 - [Quick start: library](#quick-start-library)
@@ -49,12 +50,62 @@ tiksocket login
 | Sessions | Encrypted multi file auth state like Baileys `useMultiFileAuthState`, many accounts side by side |
 | Video posts | Upload a video with caption and hashtags, optional music search or TikTok's suggested sound |
 | Photo posts | 1 to 35 photos as a swipeable carousel with title, caption and music |
-| Direct messages | List chats, read messages (text, stickers, shared videos, images), send text, idempotent sends |
+| Direct messages | List chats, read messages (text, stickers, shared videos, images), send text, start new chats and message requests, accept or delete requests, react, reply to a message, idempotent sends |
+| People | Profile lookup, user search, followers and following lists, relationship check, follow, unfollow, block, unblock, remove a follower |
+| Content | Post details and stats, a user's posts, comments, like, favorite, repost, comment, reply, like and delete comments, share a post to a chat, download videos |
+| Your posts | Delete, pin, change who can see a post and whether comments are on |
+| Profile | Change name, username, bio and photo, switch the account between private and public |
+| Discover | Search videos, hashtags and their posts, For You and Explore feeds, notifications (likes, comments, follows, mentions) |
 | Live events | `messages.upsert`, `chats.update`, `connection.update` and more, delivered to handlers, SSE and WebSocket |
-| CLI | `login`, `whoami`, `logout`, `accounts`, `post video`, `post photos`, `chats`, `messages`, `send`, `listen`, `serve` |
+| CLI | 50 commands, from `login` and `post photos` to `follow`, `comment`, `profile`, `feed` and `serve` |
 | Server | Web UI, REST API, token auth, Server Sent Events, WebSocket, multi account |
 | Robustness | Page load retries with backoff, selector fallbacks, popup dismissal, click verification, logout and rate limit detection, failure screenshots |
 | Deploy | Dockerfile and docker compose, headless by default, proxy support |
+
+## What TikTok web allows
+
+TikSocket only does what the TikTok website itself lets a logged in person do. Everything else is marked as app only.
+
+Status key: **live** means checked against tiktok.com with a real account, **ready** means built on the web controls and TikTok's own web responses, covered by offline tests, and waiting for wider live use. Mutating actions were not run against a real account during development on purpose.
+
+| Feature | Web | Status | Python |
+| --- | --- | --- | --- |
+| QR login, verify step, cookie login | yes | live | `request_qr`, `submit_code`, `login_with_cookies` |
+| Post a video, sound search | yes | live | `post_video` |
+| Post 1 to 35 photos as a swipe post with music | yes | live | `post_photos` |
+| List chats, read messages, listen | yes | live | `chats`, `messages`, `start_listening` |
+| Send a text message | yes | live (refused until the request is accepted) | `send_message` |
+| Start a chat or send a message request | yes | ready | `start_chat` |
+| Message requests: list, accept, delete | business inbox | ready | `message_requests`, `accept_request`, `delete_request` |
+| React to a message, reply to a message | yes | ready | `react`, `reply_to` |
+| Images, voice notes, files in chats | no | app only | |
+| Profile lookup | yes | live | `get_user` |
+| Search users | yes | live | `search_users` |
+| Followers and following lists | yes | live | `followers`, `following` |
+| Relationship check | yes | live | `relationship` |
+| Follow, unfollow | yes | ready | `follow`, `unfollow` |
+| Block, unblock | yes | ready | `block`, `unblock` |
+| Remove a follower | yes | ready | `remove_follower` |
+| Post details and stats | yes | live | `get_post` |
+| A user's posts, your own posts | yes | live | `user_posts` |
+| Comments of a post | yes | live | `comments` |
+| Like, unlike | yes | ready | `like`, `unlike` |
+| Favorite, unfavorite | yes | ready | `favorite`, `unfavorite` |
+| Repost, undo repost | yes, on other people's posts | ready | `repost`, `undo_repost` |
+| Comment, reply, like a comment, delete your comment | yes | ready | `comment`, `reply_comment`, `like_comment`, `delete_comment` |
+| Share a post to a chat | yes | ready | `share_to_chat` |
+| Download a video | yes | live | `download` |
+| Delete your post | yes, through TikTok Studio | ready | `delete_post` |
+| Who can see your post, comments on or off | yes, through TikTok Studio | ready | `post_settings` |
+| Pin or unpin your post | depends on the account | ready, raises `NotSupported` when web hides it | `pin_post`, `unpin_post` |
+| Change name, username, bio, photo | yes | ready | `update_profile` |
+| Private or public account | yes, in settings | ready | `set_private` |
+| Website link in bio | no | app only | |
+| Search videos and photo posts | yes | live | `search_posts` |
+| Hashtag info and posts | yes | live | `hashtag`, `hashtag_posts` |
+| For You and Explore feeds | yes | live | `feed` |
+| Notifications | yes | live | `notifications` |
+| Stories, duets, stitches, LIVE | no | app only | |
 
 ## Install
 
@@ -91,6 +142,49 @@ tiksocket messages 0:1:111:222
 tiksocket send 0:1:111:222 "Hello!" --client-id order-42
 tiksocket listen
 tiksocket serve --port 8787
+```
+
+People, content and profile:
+
+```bash
+tiksocket user @tiktok
+tiksocket search-users "real estate baku"
+tiksocket followers @someone --count 50
+tiksocket following
+tiksocket relation @someone
+tiksocket follow @someone
+tiksocket unfollow @someone
+tiksocket block @spammer
+tiksocket remove-follower @someone
+
+tiksocket post-info https://www.tiktok.com/@user/video/7600000000000000000
+tiksocket posts @someone --limit 20
+tiksocket comments https://www.tiktok.com/@user/video/7600000000000000000
+tiksocket like https://www.tiktok.com/@user/video/7600000000000000000
+tiksocket favorite https://www.tiktok.com/@user/video/7600000000000000000
+tiksocket repost https://www.tiktok.com/@user/video/7600000000000000000
+tiksocket comment https://www.tiktok.com/@user/video/7600000000000000000 "Great view"
+tiksocket reply https://www.tiktok.com/@user/video/7600000000000000000 7600000000000000001 "Thank you"
+tiksocket download https://www.tiktok.com/@user/video/7600000000000000000 -o clip.mp4
+tiksocket share https://www.tiktok.com/@user/video/7600000000000000000 @friend
+
+tiksocket post-settings https://www.tiktok.com/@me/video/7600000000000000000 --who friends --comments off
+tiksocket pin https://www.tiktok.com/@me/video/7600000000000000000
+tiksocket delete-post https://www.tiktok.com/@me/video/7600000000000000000
+
+tiksocket profile --name "My Shop" --bio "Open 9 to 6" --avatar logo.jpg
+tiksocket privacy private
+
+tiksocket search-posts "baku apartment"
+tiksocket hashtag baku --posts 10
+tiksocket feed --kind explore --count 5
+tiksocket notifications --kind comment
+
+tiksocket new-chat @someone "Hello, is this still available?"
+tiksocket requests
+tiksocket accept-request 0:1:111:222
+tiksocket react 0:1:111:222 12 "❤️"
+tiksocket reply-message 0:1:111:222 12 "Yes, it is"
 ```
 
 Every command takes `--json` for machine readable output and `-a NAME` to pick an account:
@@ -162,7 +256,11 @@ Open the printed link. The page lets you:
 - add accounts and log in with a QR code
 - answer TikTok's checks with your own code field and buttons
 - post videos and photo carousels with music
-- read chats and reply
+- read chats, reply and start new chats
+- open profiles, follow, block, list followers and posts, search users
+- open a post, like, favorite, repost, comment, reply, download, and manage your own posts
+- edit your profile and switch the account private or public
+- browse the For You and Explore feeds, search videos and hashtags, read notifications and message requests
 - watch the live event stream
 
 The token is required for every `/api/` call, as `Authorization: Bearer <token>` or `?token=`. Set a fixed one with `--token` or `TIKSOCKET_TOKEN`. Use `--host 0.0.0.0` to listen on all interfaces and put it behind HTTPS if it is reachable from the internet.
@@ -180,6 +278,8 @@ The token is required for every `/api/` call, as `Authorization: Bearer <token>`
 | `messages.upsert` | `{"chat": Chat, "messages": [Message], "type": "notify" or "append"}` |
 | `messages.sent` | `{"chat_id", "text", "id", "pending", "repeated"}` |
 | `posts.upsert` | `PostResult(id, kind, url, sound)` |
+| `action.done` | `ActionResult(action, target, changed, detail)` after follow, like, repost, block and other actions that changed something |
+| `comments.upsert` | `Comment` after you comment or reply |
 | `*` | every event, handler gets `(event, payload)` |
 
 Handlers can be sync or async. `sock.once(event, handler)` and `await sock.wait_for(event, timeout)` are available too.
@@ -206,7 +306,59 @@ Handlers can be sync or async. `sock.once(event, handler)` and `await sock.wait_
 | `await chats()` | `list[Chat]` |
 | `await messages(chat_id)` | `list[Message]`, newest last |
 | `await send_message(chat_id, text, client_id="")` | Sends text; the same `client_id` is never sent twice |
+| `await start_chat(username, text, client_id="")` | Opens a chat from the profile and sends text, returns `(chat_id, SendResult)` |
+| `await message_requests()` | `list[Chat]` waiting in the requests folder |
+| `await accept_request(chat_id)` / `await delete_request(chat_id)` | Answer a message request |
+| `await react(chat_id, message_id, emoji)` | React to a message with one of TikTok's quick emoji |
+| `await reply_to(chat_id, message_id, text, client_id="")` | Reply to a specific message |
 | `start_listening(interval=25, history=False)` | Background task that emits `messages.upsert` |
+
+People:
+
+| Method | Description |
+| --- | --- |
+| `await get_user(username)` | `User` with bio, avatar, counts, privacy and your relation |
+| `await search_users(query, cursor="0")` | `Page[User]`, pass `page.cursor` back for more |
+| `await followers(username="", cursor="0", count=30)` | `Page[User]`, your own when `username` is empty |
+| `await following(username="", cursor="0", count=30)` | `Page[User]` |
+| `await relationship(username)` | `{"following", "friends", "relation", "private"}` |
+| `await follow(username)` / `await unfollow(username)` | `ActionResult`, `changed=False` when it was already so |
+| `await block(username)` / `await unblock(username)` | `ActionResult` |
+| `await remove_follower(username)` | `ActionResult` |
+
+Content:
+
+| Method | Description |
+| --- | --- |
+| `await get_post(link_or_id)` | `Post` with stats, your like and favorite state, music, video and image links |
+| `await user_posts(username="", limit=30)` | `list[Post]`, your own posts come from TikTok Studio and include private ones |
+| `await comments(post, limit=50)` | `list[Comment]` |
+| `await like(post)` / `await unlike(post)` | `ActionResult` |
+| `await favorite(post)` / `await unfavorite(post)` | `ActionResult` |
+| `await repost(post)` / `await undo_repost(post)` | `ActionResult` |
+| `await comment(post, text)` | `Comment`, up to 150 characters |
+| `await reply_comment(post, comment_id, text)` | `Comment` |
+| `await like_comment(post, comment_id)` | `ActionResult` |
+| `await delete_comment(post, comment_id)` | `ActionResult`, your own comments only |
+| `await share_to_chat(post, username)` | Sends the post into a chat with someone in your share list |
+| `await download(post, target=None)` | Video bytes, or the saved `Path` when `target` is given |
+| `await delete_post(post)` | Deletes your post through TikTok Studio |
+| `await pin_post(post)` / `await unpin_post(post)` | Pins or unpins, `NotSupported` when web does not offer it |
+| `await post_settings(post, who_can_view="", comments=None)` | `who_can_view` is `everyone`, `friends` or `only_me` |
+
+Profile and discovery:
+
+| Method | Description |
+| --- | --- |
+| `await update_profile(nickname=None, username=None, bio=None, avatar=None)` | Changes only what you pass, `avatar` is a path or bytes, returns the new `User` |
+| `await set_private(private)` | Private or public account |
+| `await search_posts(query, cursor="0")` | `Page[Post]` |
+| `await hashtag(name)` | `Hashtag(id, name, description, videos, views)` |
+| `await hashtag_posts(name, limit=30)` | `list[Post]` |
+| `await feed(kind="foryou", count=10)` | For You or `explore` feed |
+| `await notifications(count=30, kind="")` | `list[Notice]`, filter with `like`, `comment`, `follow`, `mention` |
+
+Posts and comments accept a full link (`https://www.tiktok.com/@user/video/123`, `/photo/` links too) or a bare post id. Users accept `@name`, `name` or a profile link.
 | `await close()` | Closes the browser |
 
 `dry_run=True` fills in everything on TikTok's upload page (files, title, caption, sound) and stops before pressing Post. Use it to test.
@@ -217,6 +369,13 @@ Handlers can be sync or async. `sock.once(event, handler)` and `await sock.wait_
 - `Chat(id, name, preview, date, unread, avatar, peer_id)`
 - `Message(id, chat_id, kind, text, from_me, at, image, thumb, server_id, reply, failed)`, where `kind` is one of `text`, `image`, `sticker`, `video_share`, `unsupported`
 - `PostResult(ok, id, kind, url, sound)`
+- `User(id, sec_uid, username, nickname, bio, avatar, verified, private, link, followers, following, likes, videos, friends, relation)` with `is_following` and `is_friend`
+- `Post(id, kind, url, author, caption, created, plays, likes, comments, shares, saves, reposts, liked, saved, private, pinned, comments_off, cover, play_url, download_url, duration, music, images, hashtags)`
+- `Comment(id, post_id, text, author, author_nickname, likes, replies, created, liked, reply_to)`
+- `Hashtag(id, name, description, videos, views)`
+- `Notice(id, kind, type_id, created, read, users, post_id, text)`
+- `Page(items, cursor, has_more, total)`
+- `ActionResult(ok, action, target, changed, detail)`
 - `SendResult(id, pending, repeated)`
 - `QRCode(url, image, expires_in)`
 - `VerifyPrompt(title, lines, buttons, inputs, captcha, screenshot)`
@@ -253,6 +412,28 @@ All paths below are under `http://host:8787` and need the token.
 | GET | `/api/accounts/{name}/chats` | | Chats |
 | GET | `/api/accounts/{name}/chats/{chat}/messages` | | Messages |
 | POST | `/api/accounts/{name}/chats/{chat}/messages` | `{"text": "...", "client_id": "..."}` | Send |
+| POST | `/api/accounts/{name}/chats` | `{"username": "...", "text": "...", "client_id": "..."}` | Start a chat or send a message request |
+| GET | `/api/accounts/{name}/requests` | | Message requests |
+| POST, DELETE | `/api/accounts/{name}/requests/{chat}` | | Accept or delete a request |
+| POST | `/api/accounts/{name}/chats/{chat}/messages/{message}/react` | `{"emoji": "❤️"}` | React |
+| POST | `/api/accounts/{name}/chats/{chat}/messages/{message}/reply` | `{"text": "..."}` | Reply to a message |
+| GET | `/api/accounts/{name}/users/{user}` | | Profile |
+| GET | `/api/accounts/{name}/users/{user}/followers` and `/following` | `?cursor=&count=` | People lists |
+| GET | `/api/accounts/{name}/users/{user}/relation` | | Relationship |
+| GET | `/api/accounts/{name}/users/{user}/posts` | `?limit=` | Posts of a user |
+| POST, DELETE | `/api/accounts/{name}/users/{user}/follow` | | Follow, unfollow |
+| POST, DELETE | `/api/accounts/{name}/users/{user}/block` | | Block, unblock |
+| DELETE | `/api/accounts/{name}/users/{user}/follower` | | Remove a follower |
+| GET | `/api/accounts/{name}/search/users` and `/search/posts` | `?q=&cursor=` | Search |
+| GET | `/api/accounts/{name}/hashtags/{tag}` | `?posts=10` | Hashtag and its posts |
+| GET | `/api/accounts/{name}/feed` | `?kind=foryou or explore&count=` | Feeds |
+| GET | `/api/accounts/{name}/notifications` | `?count=&kind=` | Notifications |
+| GET | `/api/accounts/{name}/post` | `?post=<link or id>` | Post details |
+| GET | `/api/accounts/{name}/post/comments` | `?post=&limit=` | Comments |
+| GET | `/api/accounts/{name}/post/download` | `?post=` | Video file |
+| POST | `/api/accounts/{name}/post/{action}` | `{"post": "...", ...}` | `like`, `unlike`, `favorite`, `unfavorite`, `repost`, `unrepost`, `comment` (`text`), `reply` (`comment_id`, `text`), `like-comment`, `delete-comment` (`comment_id`), `share` (`username`), `settings` (`who_can_view`, `comments`), `pin`, `unpin`, `delete` |
+| PATCH | `/api/accounts/{name}/profile` | `{"name", "username", "bio", "avatar": "<base64>"}` | Edit your profile |
+| POST | `/api/accounts/{name}/privacy` | `{"private": true}` | Private or public account |
 | GET | `/api/events?account=name` | | Server Sent Events stream |
 | GET | `/api/ws` | | WebSocket stream of the same events |
 
@@ -285,6 +466,8 @@ TikTok changes its web app often. TikSocket is written to survive that:
 - a message is only typed again if no bubble appeared, and `client_id` keeps retries from sending twice
 - logged out sessions, captchas and "too fast" limits raise typed errors
 - every failure saves a screenshot in `<account folder>/debug/`
+- the browser reports its real Chromium version and operating system as its user agent; TikTok silently returns empty answers for comments, post details and post lists when the two disagree
+- every follow, like, comment or profile change waits for TikTok's own JSON confirmation of that action, and `ActionResult.changed` is `False` when nothing needed to change
 
 Run with `--show-browser -v` to watch it work.
 
@@ -305,8 +488,11 @@ All errors inherit from `TikSocketError` and carry a `code`:
 | `PublishFailed` | `failed` | TikTok did not confirm the post |
 | `RequestPending` | `request_pending` | The other person has not accepted your message request |
 | `NotDelivered` | `not_delivered` | TikTok refused the message |
-| `NotFound` | `not_found` | Chat not found |
+| `NotFound` | `not_found` | Chat, user, post or comment not found |
 | `BadInput` | `bad_input` | Invalid arguments |
+| `ActionFailed` | `action_failed` | TikTok did not confirm a follow, like, comment or other action |
+| `PrivateAccount` | `private` | The account is private |
+| `NotSupported` | `not_supported` | TikTok web does not offer this, use the app |
 
 ## Docker
 
@@ -323,6 +509,9 @@ Honest list, checked against TikTok's web app:
 
 - **Stories**: TikTok's website has no story upload. Stories can only be posted from the phone app.
 - **Media in DMs**: TikTok's web chat only has a text box and emoji. Sending images, voice notes or files is not possible from the web, so TikSocket sends text only.
+- **Website link in bio**: the web profile editor has no link field, add it in the app.
+- **Duets, stitches, LIVE**: app only.
+- **Signed requests**: some TikTok web endpoints only answer requests made by TikTok's own page code. TikSocket reads those by opening the page and catching TikTok's own responses, which is slower than a direct call but keeps working.
 - **Message requests**: until the other person accepts your message request, TikTok allows just one message. Further sends raise `RequestPending`.
 - **Chat history**: messages are read from the visible chat window. Very old history may need scrolling that TikSocket does not do yet.
 - **Listening** polls the inbox (25 seconds by default) instead of keeping TikTok's internal socket open.
@@ -338,6 +527,12 @@ TikTok has no public DM API for regular accounts. TikSocket reads and sends dire
 
 **Can I post photo carousels with music?**
 Yes. `post_photos` takes 1 to 35 photos, a title, a caption and either a sound search (`sound="artist or song"`) or TikTok's first suggestion (`auto_sound=True`).
+
+**Can I follow, like and comment with Python?**
+Yes. `follow`, `like`, `favorite`, `repost`, `comment` and `reply_comment` press the same buttons a person presses and wait for TikTok's own confirmation, so a returned result means TikTok accepted it.
+
+**How do I get followers or comments as data?**
+`followers`, `following`, `comments`, `user_posts`, `search_users`, `search_posts`, `hashtag_posts`, `feed` and `notifications` return typed objects, as JSON from the CLI with `--json` and from the REST API.
 
 **Do I need TikTok developer access or an app review?**
 No. You log in with your own account by QR, like on tiktok.com.

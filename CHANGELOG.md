@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- People: profile lookup, user search, followers and following lists, relationship check, follow, unfollow, block, unblock, remove a follower
+- Content: post details and stats, a user's posts (your own through TikTok Studio, private ones included), comments, like, favorite, repost, comment, reply, like and delete comments, share a post to a chat, video download
+- Your posts: delete, pin, who can see it, comments on or off
+- Profile: name, username, bio, photo, private or public account
+- Discover: search videos, hashtags and their posts, For You and Explore feeds, notifications
+- Messages: start a chat or a message request from a username, list, accept and delete message requests, react, reply to a message
+- CLI commands, REST endpoints and web UI sections for all of the above
+- New typed models (`User`, `Post`, `Comment`, `Hashtag`, `Notice`, `Page`, `ActionResult`) and errors (`ActionFailed`, `PrivateAccount`, `NotSupported`)
+- New events `action.done` and `comments.upsert`
+- Reads that TikTok only answers for its own page code are captured from the page instead of called directly
+- The user agent now matches the real Chromium version and operating system, so TikTok answers comment, post detail and post list requests
+
 ## 0.1.1
 
 - Uploads close TikTok's "Turn on automatic content checks?" prompt with its own Cancel button before writing the caption, so the page is never blocked
