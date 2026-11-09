@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
+from .actions import Actions
 from .auth import AuthState, use_multi_file_auth_state
 from .browser import BrowserHost, BrowserOptions, snapshot
 from .constants import CAPTION_MAX, MAX_VIDEO, PHOTO_MAX, TITLE_MAX
@@ -14,7 +15,21 @@ from .errors import BadInput, BadMedia, LoggedOut, NotConnected, TikSocketError
 from .events import EventEmitter
 from .login import QRLogin, cookie_login, fetch_profile
 from .messenger import Messenger
-from .models import Chat, Message, PostResult, Profile, QRCode, SendResult
+from .models import (
+    ActionResult,
+    Chat,
+    Comment,
+    Hashtag,
+    Message,
+    Notice,
+    Page,
+    Post,
+    PostResult,
+    Profile,
+    QRCode,
+    SendResult,
+    User,
+)
 from .upload import Uploader
 
 log = logging.getLogger("tiksocket")
@@ -30,6 +45,7 @@ class TikSocket(EventEmitter):
         self.own_host = browser is None
         self.timezone = timezone
         self.messenger = Messenger(self.host, self.auth, self.emit, timezone)
+        self.actions = Actions(self.host, self.auth)
         self.login: QRLogin | None = None
         self.uploads = asyncio.Semaphore(max(1, uploads))
         self.state = "close"
@@ -208,6 +224,146 @@ class TikSocket(EventEmitter):
         await self.emit("messages.sent", {"chat_id": chat_id, "text": text, **result.to_dict()})
         return result
 
+    async def _done(self, result: ActionResult) -> ActionResult:
+        if result.changed:
+            await self.emit("action.done", result)
+        return result
+
+    async def start_chat(self, username: str, text: str, client_id: str = "") -> tuple[str, SendResult]:
+        chat_id, result = await self.messenger.start_chat(username, text, client_id)
+        await self.emit("messages.sent", {"chat_id": chat_id, "text": text, **result.to_dict()})
+        return chat_id, result
+
+    async def message_requests(self) -> list[Chat]:
+        return await self.messenger.requests()
+
+    async def accept_request(self, chat_id: str) -> None:
+        await self.messenger.accept_request(chat_id)
+
+    async def delete_request(self, chat_id: str) -> None:
+        await self.messenger.delete_request(chat_id)
+
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        await self.messenger.react(chat_id, message_id, emoji)
+
+    async def reply_to(self, chat_id: str, message_id: str, text: str, client_id: str = "") -> SendResult:
+        return await self.messenger.reply_to(chat_id, message_id, text, client_id)
+
+    async def get_user(self, username: str) -> User:
+        return await self.actions.user(username)
+
+    async def search_users(self, query: str, cursor: str = "0") -> Page:
+        return await self.actions.search_users(query, cursor)
+
+    async def followers(self, username: str = "", cursor: str = "0", count: int = 30) -> Page:
+        return await self.actions.followers(username, cursor, count)
+
+    async def following(self, username: str = "", cursor: str = "0", count: int = 30) -> Page:
+        return await self.actions.following(username, cursor, count)
+
+    async def relationship(self, username: str) -> dict:
+        return await self.actions.relationship(username)
+
+    async def follow(self, username: str) -> ActionResult:
+        return await self._done(await self.actions.follow(username))
+
+    async def unfollow(self, username: str) -> ActionResult:
+        return await self._done(await self.actions.unfollow(username))
+
+    async def block(self, username: str) -> ActionResult:
+        return await self._done(await self.actions.block(username))
+
+    async def unblock(self, username: str) -> ActionResult:
+        return await self._done(await self.actions.unblock(username))
+
+    async def remove_follower(self, username: str) -> ActionResult:
+        return await self._done(await self.actions.remove_follower(username))
+
+    async def get_post(self, post: str) -> Post:
+        return await self.actions.post(post)
+
+    async def user_posts(self, username: str = "", limit: int = 30) -> list[Post]:
+        return await self.actions.user_posts(username, limit)
+
+    async def comments(self, post: str, limit: int = 50) -> list[Comment]:
+        return await self.actions.comments(post, limit)
+
+    async def like(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.like(post))
+
+    async def unlike(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.unlike(post))
+
+    async def favorite(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.favorite(post))
+
+    async def unfavorite(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.unfavorite(post))
+
+    async def repost(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.repost(post))
+
+    async def undo_repost(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.undo_repost(post))
+
+    async def comment(self, post: str, text: str) -> Comment:
+        found = await self.actions.comment(post, text)
+        await self.emit("comments.upsert", found)
+        return found
+
+    async def reply_comment(self, post: str, comment_id: str, text: str) -> Comment:
+        found = await self.actions.reply_comment(post, comment_id, text)
+        await self.emit("comments.upsert", found)
+        return found
+
+    async def like_comment(self, post: str, comment_id: str) -> ActionResult:
+        return await self._done(await self.actions.like_comment(post, comment_id))
+
+    async def delete_comment(self, post: str, comment_id: str) -> ActionResult:
+        return await self._done(await self.actions.delete_comment(post, comment_id))
+
+    async def delete_post(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.delete_post(post))
+
+    async def pin_post(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.pin_post(post, True))
+
+    async def unpin_post(self, post: str) -> ActionResult:
+        return await self._done(await self.actions.pin_post(post, False))
+
+    async def post_settings(self, post: str, who_can_view: str = "", comments: bool | None = None) -> ActionResult:
+        return await self._done(await self.actions.post_settings(post, who_can_view, comments))
+
+    async def search_posts(self, query: str, cursor: str = "0") -> Page:
+        return await self.actions.search_posts(query, cursor)
+
+    async def hashtag(self, name: str) -> Hashtag:
+        return await self.actions.hashtag(name)
+
+    async def hashtag_posts(self, name: str, limit: int = 30) -> list[Post]:
+        return await self.actions.hashtag_posts(name, limit)
+
+    async def feed(self, kind: str = "foryou", count: int = 10) -> list[Post]:
+        return await self.actions.feed(kind, count)
+
+    async def notifications(self, count: int = 30, kind: str = "") -> list[Notice]:
+        return await self.actions.notifications(count, kind)
+
+    async def download(self, post: str, target: str | os.PathLike | None = None):
+        return await self.actions.download(post, target)
+
+    async def update_profile(self, nickname: str | None = None, username: str | None = None, bio: str | None = None,
+                             avatar: str | os.PathLike | bytes | None = None) -> User:
+        user = await self.actions.update_profile(nickname, username, bio, avatar)
+        await self.emit("creds.update", self.profile.to_dict())
+        return user
+
+    async def set_private(self, private: bool) -> ActionResult:
+        return await self._done(await self.actions.set_private(private))
+
+    async def share_to_chat(self, post: str, username: str) -> ActionResult:
+        return await self._done(await self.actions.share_to_chat(post, username))
+
     def start_listening(self, interval: float = 25.0, history: bool = False) -> asyncio.Task:
         return self.messenger.start_listening(interval, history)
 
@@ -215,6 +371,7 @@ class TikSocket(EventEmitter):
         if self.login is not None:
             await self.login.cancel()
         await self.messenger.close()
+        await self.actions.close()
         if self.own_host:
             await self.host.close()
 
