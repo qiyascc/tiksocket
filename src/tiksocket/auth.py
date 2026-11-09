@@ -91,12 +91,16 @@ class AuthState:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def browser_folder(self) -> Path:
+        return self.folder / "browser"
+
     def clear(self) -> None:
         for name in ("state.bin", "profile.json", "sent.json", "seen.json"):
             try:
                 (self.folder / name).unlink()
             except FileNotFoundError:
                 pass
+        shutil.rmtree(self.browser_folder(), ignore_errors=True)
 
     def remove(self) -> None:
         shutil.rmtree(self.folder, ignore_errors=True)
