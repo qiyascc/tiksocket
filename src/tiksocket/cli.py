@@ -29,6 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--proxy", default=os.environ.get("TIKSOCKET_PROXY", ""), help="proxy URL for Chromium")
     parser.add_argument("--timezone", default=os.environ.get("TIKSOCKET_TZ", "UTC"))
     parser.add_argument("--json", action="store_true", help="print JSON")
+    parser.add_argument("--captcha-timeout", type=float, default=float(os.environ.get("TIKSOCKET_CAPTCHA_TIMEOUT") or 600),
+                        help="seconds to wait for a person to solve a TikTok captcha, 0 fails at once")
+    parser.add_argument("--captcha-host", default=os.environ.get("TIKSOCKET_CAPTCHA_HOST", "127.0.0.1"),
+                        help="address of the small captcha page the CLI opens when TikTok asks for one")
+    parser.add_argument("--captcha-port", type=int, default=int(os.environ.get("TIKSOCKET_CAPTCHA_PORT") or 8788))
+    parser.add_argument("--no-open", action="store_true", help="print the captcha link without opening a browser")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -272,7 +278,8 @@ def out(args, value, text: str = "") -> None:
 
 def make_socket(args) -> TikSocket:
     auth = use_multi_file_auth_state(Path(args.home) / args.account)
-    return TikSocket(auth, headless=not args.show_browser, proxy=args.proxy, timezone=args.timezone)
+    return TikSocket(auth, headless=not args.show_browser, proxy=args.proxy, timezone=args.timezone,
+                     captcha_timeout=args.captcha_timeout)
 
 
 async def ask(text: str) -> str:
@@ -336,6 +343,9 @@ async def run(args) -> int:
                          headless=not args.show_browser, proxy=args.proxy, timezone=args.timezone)
         return 0
     sock = make_socket(args)
+    from .server.captcha import CaptchaPage
+
+    page = CaptchaPage(sock, host=args.captcha_host, port=args.captcha_port, open_browser=not args.no_open).attach()
     try:
         if args.command == "login":
             return await cmd_login(args, sock)
@@ -391,6 +401,7 @@ async def run(args) -> int:
         return 2
     finally:
         await sock.close()
+        await page.close()
     return 1
 
 

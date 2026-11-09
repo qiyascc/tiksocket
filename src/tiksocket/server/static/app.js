@@ -300,6 +300,15 @@
       el("button", { type: "button", className: "ghost small", textContent: "Delete", onclick: (ev) => busy(ev.target, () => explore(() => api(`/requests/${encodeURIComponent(r.id)}`, { method: "DELETE" }).then(() => $("#load-requests").click()))) }))));
   }));
 
+  let solver = null;
+  const openCaptcha = (name) => {
+    const modal = $("#captcha-modal");
+    if (solver) solver.stop();
+    solver = TikCaptcha.mount($("#captcha-box"), { api: `/api/accounts/${encodeURIComponent(name)}`, token, onClose: () => { solver && solver.stop(); solver = null; modal.close(); } });
+    if (!modal.open) modal.showModal();
+  };
+  const closeCaptcha = () => { if (solver) solver.stop(); solver = null; if ($("#captcha-modal").open) $("#captcha-modal").close(); };
+
   const stream = () => {
     const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     es.onopen = () => $("#live").classList.add("on");
@@ -310,6 +319,8 @@
       li.textContent = `${new Date().toLocaleTimeString()} ${item.account} ${item.event} ${JSON.stringify(item.data).slice(0, 300)}`;
       $("#events").prepend(li);
       if (item.account === account && ["qr", "verify", "connection.update", "qr.status"].includes(item.event)) refresh();
+      if (item.event === "captcha.required") openCaptcha(item.account);
+      if (["captcha.solved", "captcha.failed"].includes(item.event)) setTimeout(closeCaptcha, 1500);
       if (item.account === account && item.event === "messages.upsert") { loadChats(); if (item.data.chat && item.data.chat.id === chat) openChat(item.data.chat); }
     };
   };
@@ -323,6 +334,6 @@
     loadAccounts().then(refresh);
   };
 
-  loadAccounts().then(refresh);
+  loadAccounts().then(refresh).then(() => api("/captcha")).then((r) => { if (r && r.pending) openCaptcha(account); }).catch(() => {});
   stream();
 })();

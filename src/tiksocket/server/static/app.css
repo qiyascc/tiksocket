@@ -53,3 +53,14 @@ form { display: grid; gap: 10px; }
 .list li img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
 .list li button { flex: none; }
 a.button { display: inline-flex; align-items: center; border-radius: 10px; padding: 9px 14px; font-weight: 600; text-decoration: none; color: var(--ink); border: 1px solid var(--line); }
+main.solo { grid-template-columns: minmax(0, 860px); justify-content: center; }
+.cap { display: grid; gap: 10px; }
+.cap-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.cap-hint { margin: 0; }
+.cap-stage { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #000; min-height: 160px; }
+.cap-img { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; user-select: none; }
+.cap-img:active { cursor: grabbing; }
+.cap-wait { position: absolute; inset: 0; display: grid; place-items: center; color: #9ca3af; }
+.cap-wait[hidden] { display: none; }
+dialog.cap-modal { width: min(920px, calc(100vw - 24px)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: var(--card); color: var(--ink); }
+dialog.cap-modal::backdrop { background: rgba(0, 0, 0, .55); }

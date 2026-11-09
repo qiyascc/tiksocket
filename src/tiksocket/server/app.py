@@ -17,6 +17,8 @@ from ..client import TikSocket
 from ..constants import DEFAULT_PORT, PHOTO_MAX
 from ..errors import BadInput, NotFound, TikSocketError
 from ..terminal import qr_svg
+from .captcha import RESOLVE
+from .captcha import add_routes as add_captcha_routes
 
 log = logging.getLogger("tiksocket")
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
@@ -504,6 +506,7 @@ def build_app(manager: Manager, token: str = "") -> web.Application:
     app = web.Application(middlewares=[guard], client_max_size=400 * 1024 * 1024)
     app[MANAGER] = manager
     app[TOKEN] = token
+    app[RESOLVE] = lambda request: _account(request).sock
 
     async def cleanup(app):
         await manager.close()
@@ -550,6 +553,7 @@ def build_app(manager: Manager, token: str = "") -> web.Application:
     r.add_delete(f"{base}/requests/{{chat}}", chat_request_answer)
     r.add_post(f"{base}/chats/{{chat}}/messages/{{message}}/react", message_react)
     r.add_post(f"{base}/chats/{{chat}}/messages/{{message}}/reply", message_reply)
+    add_captcha_routes(r, base)
     r.add_get("/api/events", events)
     r.add_get("/api/ws", socket_events)
     return app
