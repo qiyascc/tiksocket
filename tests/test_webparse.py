@@ -181,3 +181,14 @@ async def test_refused_pages_raise_rate_limited(monkeypatch):
     page = _Page([403, 200])
     session.tab = page
     assert await session._load(page, "https://www.tiktok.com/@x", 0) is page
+
+
+def test_follow_state_from_button():
+    from tiksocket.webparse import follow_state
+
+    assert follow_state("Follow") == "none"
+    assert follow_state("Follow back") == "none"
+    assert follow_state("Following") == "following"
+    assert follow_state("Friends") == "friends"
+    assert follow_state("Requested") == "requested"
+    assert follow_state("") == ""

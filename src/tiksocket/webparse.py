@@ -280,3 +280,18 @@ def notice_from(raw: dict) -> Notice:
     return Notice(id=str(raw.get("nid_str") or raw.get("nid") or ""), kind=kind, type_id=kind_id,
                   created=num(raw.get("create_time")), read=bool(raw.get("has_read")), users=[n for n in names if n],
                   post_id=str(aweme.get("aweme_id") or "") if isinstance(aweme, dict) else "", text=text)
+
+
+def follow_state(label: str) -> str:
+    text = (label or "").strip().lower()
+    if not text:
+        return ""
+    if "friend" in text:
+        return "friends"
+    if "request" in text:
+        return "requested"
+    if "following" in text or "unfollow" in text:
+        return "following"
+    if "follow" in text:
+        return "none"
+    return ""

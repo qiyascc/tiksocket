@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ from urllib.parse import quote
 from . import webparse as wp
 from .auth import AuthState
 from .browser import BrowserHost, snapshot
+from .captcha import CaptchaGate
 from .constants import CONTENT_URL, HOME
 from .errors import ActionFailed, BadInput, NotFound, NotSupported, PageChanged, TikSocketError, Unavailable
 from .models import ActionResult, Comment, Hashtag, Notice, Page, Post, User
@@ -53,11 +55,28 @@ REPOST_PATHS = ("/tiktok/v1/upvote", "/upvote/", "/api/repost")
 PROFILE_PATHS = ("/api/update/profile", "/user/profile/update", "/passport/web/user/update", "/update/profile",
                  "/api/user/update")
 STUDIO_LIST = ("/tiktok/creator/manage/item_list",)
-DELETE_POST_PATHS = ("/api/aweme/delete", "/aweme/delete", "/item/delete", "/api/post/delete", "/tiktokstudio/api")
-PRIVACY_PATHS = ("/aweme/modify", "/item/modify", "/api/post/edit", "/visibility", "/tiktokstudio/api", "/privacy")
-PIN_PATHS = ("/pin", "/stick")
+DELETE_POST_PATHS = ("/tiktok/post/delete", "/api/aweme/delete", "/aweme/delete", "/item/delete", "/api/post/delete")
+PRIVACY_PATHS = ("/tiktok/post/edit/v1", "/tiktok/post/edit")
+PIN_PATHS = ("/tiktok/post/edit", "/pin", "/stick", "/top")
+STUDIO_MORE = ("[data-tt=components_ActionCell_Clickable]", "button:has(svg)")
+STUDIO_MENU_ITEM = ("[data-tt=components_Popover_Container] [data-tt=components_ActionCell_FlexRow]",
+                    "[role=menu] [role=menuitem]", "[data-floating-ui-portal] [role=button]")
+EDIT_POST_URL = "https://www.tiktok.com/tiktokstudio/upload/post/{pid}?from=creator_center"
+STUDIO_ROW_JS = """([pid, mark]) => {
+  let node = document.querySelector(`a[href*="${pid}"], [data-tt*="${pid}"]`);
+  while (node && !node.querySelector('[data-tt=components_PrivacyCell_TUXButton], [data-tt=components_ActionCell_Clickable]')) {
+    node = node.parentElement;
+  }
+  if (!node) return false;
+  node.setAttribute('data-ts-row', mark);
+  return true;
+}"""
 FOLLOWERS_SCENE, FOLLOWING_SCENE = 67, 21
 NOTICE_ALL = 500
+
+
+class _Unchanged(TikSocketError):
+    pass
 
 
 def _word(*words: str) -> re.Pattern:
@@ -65,8 +84,8 @@ def _word(*words: str) -> re.Pattern:
 
 
 class Actions:
-    def __init__(self, host: BrowserHost, auth: AuthState):
-        self.web = WebSession(host, auth)
+    def __init__(self, host: BrowserHost, auth: AuthState, gate: CaptchaGate | None = None):
+        self.web = WebSession(host, auth, gate)
         self.auth = auth
 
     @property
@@ -149,8 +168,22 @@ class Actions:
 
         async with self.web.lock:
             data = await self._guard(self.web.expect(FOLLOW_PATHS, act))
+            state = await self._follow_state(name)
+        kept = state in ("following", "friends", "requested") if want else state == "none"
+        if state and not kept:
+            raise ActionFailed("TikTok answered but did not keep the change, the account may be limited, "
+                               "try again later")
         return ActionResult(action="follow" if want else "unfollow", target=name,
-                            detail={"follow_status": data.get("follow_status", data.get("followStatus"))})
+                            detail={"follow_status": data.get("follow_status", data.get("followStatus")),
+                                    "state": state or "unknown"})
+
+    async def _follow_state(self, name: str) -> str:
+        await self.web.view.wait_for_timeout(2500)
+        await self.web.goto(f"{HOME}@{name}", settle=3000)
+        button = await self.web.find(FOLLOW[:1], 6)
+        if button is None:
+            return ""
+        return wp.follow_state(await button.inner_text())
 
     async def follow(self, raw: str) -> ActionResult:
         return await self._follow(raw, True)
@@ -466,79 +499,122 @@ class Actions:
         await self._guard(self.web.expect(COMMENT_DELETE_PATHS, act))
         return ActionResult(action="delete_comment", target=str(comment_id))
 
-    async def _studio_row(self, pid: str):
-        await self.web.goto(CONTENT_URL, settle=5000)
-        row = await self.web.find((f"[data-tt*='{pid}']", f"a[href*='{pid}']"), 12)
-        if row is None:
-            raise NotFound(f"post {pid} is not in your TikTok Studio posts")
-        holder = row.locator("xpath=ancestor::*[.//button][1]")
-        return holder if await holder.count() else row
+    async def _studio_items(self) -> dict:
+        box: dict = {}
 
-    async def _studio_menu(self, pid: str, label: re.Pattern, paths: tuple, confirm: re.Pattern | None) -> None:
+        async def grab(response) -> None:
+            if any(path in response.url for path in STUDIO_LIST):
+                try:
+                    data = await response.json()
+                except Exception:
+                    return
+                for item in (data or {}).get("item_list") or []:
+                    box[str(item.get("item_id") or "")] = item
+
+        def listener(response) -> None:
+            asyncio.ensure_future(grab(response))
+
+        try:
+            await self.web.page()
+            self.web.context.on("response", listener)
+            await self.web.goto(CONTENT_URL, settle=5000)
+        finally:
+            if self.web.context is not None:
+                self.web.context.remove_listener("response", listener)
+        return box
+
+    async def _studio_row(self, pid: str):
+        items = await self._studio_items()
+        page = self.web.view
+        mark = f"ts-{pid}"
+        found = False
+        for _ in range(20):
+            found = await page.evaluate(STUDIO_ROW_JS, [pid, mark])
+            if found:
+                break
+            await page.wait_for_timeout(500)
+        if not found:
+            raise NotFound(f"post {pid} is not in your TikTok Studio posts")
+        return page.locator(f"[data-ts-row='{mark}']").first, items.get(pid) or {}
+
+    async def _studio_menu(self, pid: str, label: re.Pattern, paths: tuple, confirm: re.Pattern | None,
+                           permission: str = "") -> None:
         async def act():
-            holder = await self._studio_row(pid)
-            await holder.hover(timeout=3000)
-            buttons = holder.locator("button[aria-label], [role=button][aria-label], button:has(svg)")
-            if not await buttons.count():
+            row, item = await self._studio_row(pid)
+            rule = ((item.get("permissions") or {}).get(permission) or {}) if permission else {}
+            if rule.get("show_type") == 3:
+                raise NotSupported(rule.get("reason") or "TikTok does not allow this for the post")
+            await row.hover(timeout=3000)
+            more = row.locator(", ".join(STUDIO_MORE))
+            if not await more.count():
                 raise PageChanged("post menu not found")
-            await buttons.last.click(timeout=4000)
-            await self.web.press(MENU, 5, label)
+            await more.last.click(timeout=4000)
+            entry = await self.web.find(STUDIO_MENU_ITEM, 5, label)
+            if entry is None:
+                raise PageChanged("post menu entry not found")
+            if (await entry.get_attribute("cursor") or "") == "not-allowed":
+                raise NotSupported("TikTok greyed out this option for the post")
+            await entry.click(timeout=4000)
             if confirm is not None:
                 button = await self.web.find(DIALOG_BUTTON, 5, confirm)
                 if button is not None:
                     await button.click(timeout=4000)
 
-        await self._guard(self.web.expect(paths, act))
+        await self._guard(self.web.expect(paths, act, wait=30))
 
     async def delete_post(self, raw: str) -> ActionResult:
         _, _, pid = self._post(raw)
         async with self.web.lock:
-            await self._studio_menu(pid, _word("Delete"), DELETE_POST_PATHS, _word("Delete"))
+            await self._studio_menu(pid, _word("Delete"), DELETE_POST_PATHS, _word("Delete"), "can_delete")
         return ActionResult(action="delete_post", target=pid)
 
     async def pin_post(self, raw: str, pin: bool = True) -> ActionResult:
         _, _, pid = self._post(raw)
-        label = _word("Pin", "Pin to top") if pin else _word("Unpin")
+        label = _word("Pin to top", "Pin") if pin else _word("Unpin", "Remove from top", "Unpin from top")
         async with self.web.lock:
-            try:
-                await self._studio_menu(pid, label, PIN_PATHS + DELETE_POST_PATHS[-1:], None)
-            except PageChanged as exc:
-                raise NotSupported("TikTok web did not offer pinning for this post, use the app") from exc
+            await self._studio_menu(pid, label, PIN_PATHS, None, "can_pin" if pin else "")
         return ActionResult(action="pin" if pin else "unpin", target=pid)
 
     async def post_settings(self, raw: str, who_can_view: str = "", comments: bool | None = None) -> ActionResult:
         _, _, pid = self._post(raw)
-        labels = {"everyone": _word("Everyone", "Public"), "friends": _word("Friends"),
-                  "only_me": _word("Only you", "Only me", "Private")}
+        labels = {"everyone": _word("Everyone"), "friends": _word("Friends"), "only_me": _word("Only you", "Only me")}
+        options = {key: re.compile(r"^\s*(" + "|".join(words) + r")\b", re.I)
+                   for key, words in (("everyone", ("Everyone",)), ("friends", ("Friends",)),
+                                      ("only_me", ("Only you", "Only me")))}
         if who_can_view and who_can_view not in labels:
             raise BadInput("who_can_view is everyone, friends or only_me")
         if not who_can_view and comments is None:
             raise BadInput("nothing to change")
+        changed = {"value": False}
 
         async def act():
-            holder = await self._studio_row(pid)
-            await holder.hover(timeout=3000)
-            edit = holder.locator("button[aria-label*=edit i], a[href*=edit], button:has-text('Edit')").first
-            if not await edit.count():
-                raise NotSupported("TikTok web did not offer post settings here, use the app")
-            await edit.click(timeout=4000)
-            await self.web.page()
+            page = await self.web.goto(EDIT_POST_URL.format(pid=pid), settle=5000)
             if who_can_view:
-                await self.web.press(("[role=combobox]", "button:has-text('Everyone')", "button:has-text('Friends')",
-                                      "button:has-text('Only you')"), 8)
-                await self.web.press(("[role=option]", "[role=menuitem]", "li"), 4, labels[who_can_view])
+                current = await self.web.find(("button",), 10, re.compile(r"^\s*(Everyone|Friends|Only you|Only me)\s*$"))
+                if current is None:
+                    raise PageChanged("visibility control not found")
+                if not labels[who_can_view].match(await current.inner_text()):
+                    await current.click(timeout=4000)
+                    await self.web.press(("[role=option]",), 5, options[who_can_view])
+                    changed["value"] = True
             if comments is not None:
-                box = await self.web.find(("label:has-text('comment') input[type=checkbox]",
-                                           "label:has-text('Comment') [role=checkbox]", "[role=switch]"), 5)
-                if box is not None:
-                    state = await box.get_attribute("aria-checked")
-                    checked = state == "true" if state is not None else await box.is_checked()
-                    if checked != comments:
-                        await box.click(timeout=3000, force=True)
-            await self.web.press(("button:has-text('Save')", "button:has-text('Post')", "button:has-text('Update')"), 6)
+                box = page.locator("label").filter(has_text=re.compile(r"^\s*Comment\b")).locator(
+                    "input[type=checkbox]").first
+                if not await box.count():
+                    raise NotSupported("TikTok web did not offer the comment setting for this post")
+                if await box.is_checked() != comments:
+                    await box.click(timeout=3000, force=True)
+                    changed["value"] = True
+            if not changed["value"]:
+                raise _Unchanged()
+            await self.web.press(("button",), 6, _word("Save"))
 
         async with self.web.lock:
-            await self._guard(self.web.expect(PRIVACY_PATHS, act, wait=30))
+            try:
+                await self._guard(self.web.expect(PRIVACY_PATHS, act, wait=30))
+            except _Unchanged:
+                return ActionResult(action="post_settings", target=pid, changed=False,
+                                    detail={"who_can_view": who_can_view, "comments": comments})
         return ActionResult(action="post_settings", target=pid,
                             detail={"who_can_view": who_can_view, "comments": comments})
 
