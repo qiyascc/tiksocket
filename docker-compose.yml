@@ -1,0 +1,15 @@
+services:
+  tiksocket:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      TIKSOCKET_TOKEN: change-me
+      TIKSOCKET_KEY: ""
+      TIKSOCKET_TZ: UTC
+    volumes:
+      - tiksocket-data:/data
+    restart: unless-stopped
+
+volumes:
+  tiksocket-data:
