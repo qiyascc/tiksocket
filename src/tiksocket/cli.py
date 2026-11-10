@@ -35,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="address of the small captcha page the CLI opens when TikTok asks for one")
     parser.add_argument("--captcha-port", type=int, default=int(os.environ.get("TIKSOCKET_CAPTCHA_PORT") or 8788))
     parser.add_argument("--no-open", action="store_true", help="print the captcha link without opening a browser")
+    parser.add_argument("--robot", action="store_true", default=os.environ.get("TIKSOCKET_HUMAN") == "0",
+                        help="click and type instantly instead of moving and typing like a person")
+    parser.add_argument("--human-speed", type=float, default=float(os.environ.get("TIKSOCKET_HUMAN_SPEED") or 1),
+                        help="speed of the person-like mouse, typing and pauses, 2 is twice as fast")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -279,7 +283,7 @@ def out(args, value, text: str = "") -> None:
 def make_socket(args) -> TikSocket:
     auth = use_multi_file_auth_state(Path(args.home) / args.account)
     return TikSocket(auth, headless=not args.show_browser, proxy=args.proxy, timezone=args.timezone,
-                     captcha_timeout=args.captcha_timeout)
+                     captcha_timeout=args.captcha_timeout, human=not args.robot, human_speed=args.human_speed)
 
 
 async def ask(text: str) -> str:

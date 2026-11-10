@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
+from . import human as humanize
 from .actions import Actions
 from .auth import AuthState, use_multi_file_auth_state
 from .browser import BrowserHost, BrowserOptions, snapshot
@@ -40,8 +41,9 @@ SOUND_MODES = ("none", "auto", "search")
 class TikSocket(EventEmitter):
     def __init__(self, auth: AuthState | str | os.PathLike = "tiksocket_auth", *, headless: bool = True,
                  proxy: str = "", timezone: str = "UTC", browser: BrowserHost | None = None, uploads: int = 2,
-                 captcha_timeout: float = 600.0):
+                 captcha_timeout: float = 600.0, human: bool | None = None, human_speed: float | None = None):
         super().__init__()
+        humanize.configure(enabled=human, speed=human_speed)
         self.captcha = CaptchaGate(self.emit, captcha_timeout)
         self.auth = auth if isinstance(auth, AuthState) else use_multi_file_auth_state(auth)
         self.host = browser or BrowserHost(BrowserOptions(headless=headless, proxy=proxy, timezone=timezone))
