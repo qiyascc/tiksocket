@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from playwright.async_api import BrowserContext, Page
 
-from . import parse, webparse
+from . import human, parse, webparse
 from .auth import AuthState
 from .browser import BrowserHost, body_text, snapshot
 from .captcha import CaptchaGate
@@ -141,7 +141,7 @@ class Messenger:
             button = page.locator(selector).first
             try:
                 if await button.count() and await button.is_visible():
-                    await button.click(timeout=2000)
+                    await human.click(button, timeout=2000)
                     await page.wait_for_timeout(500)
                     if not await dialogs.count():
                         return
@@ -185,7 +185,7 @@ class Messenger:
                 await self._open_inbox(fresh=True)
                 continue
             try:
-                await target.click(timeout=8000)
+                await human.click(target, timeout=8000)
                 await page.locator(LIST).first.wait_for(timeout=15000)
                 await page.wait_for_timeout(1200)
                 return
@@ -233,14 +233,14 @@ class Messenger:
 
     async def _type(self, box, text: str) -> None:
         page = self.page
-        await box.click(timeout=5000)
+        await human.click(box, timeout=5000)
         if (await box.inner_text(timeout=2000)).strip():
             await page.keyboard.press("Control+A")
             await page.keyboard.press("Backspace")
         lines = text.split("\n")
         for index, line in enumerate(lines):
             if line:
-                await page.keyboard.insert_text(line)
+                await human.type_text(page, line)
             if index < len(lines) - 1:
                 await page.keyboard.press("Shift+Enter")
         await page.wait_for_timeout(300)
@@ -379,7 +379,7 @@ class Messenger:
             button = page.locator("[data-e2e=message-button]").first
             if not await button.count():
                 raise NotSupported(f"@{name} does not accept messages from you on TikTok web")
-            await button.click(timeout=8000)
+            await human.click(button, timeout=8000)
             await self._leave_suite()
             deadline = time.time() + 25
             while time.time() < deadline and await self._editor() is None:
@@ -420,7 +420,7 @@ class Messenger:
             has_text=re.compile(r"^\s*(Message requests|Requests)\b", re.I)).first
         if not await entry.count():
             raise NotSupported("TikTok web shows no message requests for this account")
-        await entry.click(timeout=6000)
+        await human.click(entry, timeout=6000)
         await page.wait_for_timeout(2500)
 
     async def requests(self) -> list[Chat]:
@@ -441,15 +441,15 @@ class Messenger:
             target = page.locator(f'[data-conv-id="{chat_id}"]').first
             if not await target.count():
                 raise NotFound(f"request {chat_id} not found")
-            await target.click(timeout=6000)
+            await human.click(target, timeout=6000)
             await page.wait_for_timeout(1500)
             button = page.locator("button, [role=button]").filter(has_text=re.compile(rf"^\s*{label}\s*$", re.I)).first
             if not await button.count():
                 raise PageChanged(f"{label} button not found")
-            await button.click(timeout=5000)
+            await human.click(button, timeout=5000)
             confirm = page.locator("[role=dialog] button").filter(has_text=re.compile(rf"^\s*{label}\s*$", re.I)).first
             if await confirm.count():
-                await confirm.click(timeout=5000)
+                await human.click(confirm, timeout=5000)
             await page.wait_for_timeout(2000)
             if await button.count() and await button.is_visible():
                 await snapshot(page, self.auth.debug_folder(), "dm-request-error.png")
@@ -480,12 +480,12 @@ class Messenger:
             opener = bubble.locator("[aria-label*=react i], [data-e2e*=reaction], [data-e2e*=emoji], [class*=Reaction]").first
             if not await opener.count():
                 raise NotSupported("TikTok web shows no reaction button for this message")
-            await opener.click(timeout=4000)
+            await human.click(opener, timeout=4000)
             choice = self.page.locator("[data-floating-ui-portal] *, [role=dialog] *, [role=menu] *").filter(
                 has_text=re.compile(rf"^\s*{re.escape(emoji)}\s*$")).last
             if not await choice.count():
                 raise NotSupported(f"{emoji} is not in TikTok's quick reactions")
-            await choice.click(timeout=4000)
+            await human.click(choice, timeout=4000)
             await self.page.wait_for_timeout(1500)
             if emoji not in (await bubble.inner_text(timeout=3000)):
                 raise ActionFailed("reaction did not show up")
@@ -504,12 +504,12 @@ class Messenger:
             if not await button.count():
                 more = self.page.locator("[id^=more-action-icon-msg-]").last
                 if await more.count():
-                    await more.click(timeout=3000)
+                    await human.click(more, timeout=3000)
                 button = self.page.locator("[role=menu] *, [data-floating-ui-portal] *").filter(
                     has_text=re.compile(r"^\s*Reply\s*$", re.I)).first
             if not await button.count():
                 raise NotSupported("TikTok web shows no reply option for this message")
-            await button.click(timeout=4000)
+            await human.click(button, timeout=4000)
             before = {row["id"] for row in (await self._items())["items"]}
             state, value = await self._push(text, before, chat_id)
             return self._outcome(state, value, client_id)

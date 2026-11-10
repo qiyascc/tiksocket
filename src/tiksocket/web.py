@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 from playwright.async_api import BrowserContext, Page, Response
 
-from . import webparse
+from . import human, webparse
 from .auth import AuthState
 from .browser import BrowserHost, body_text, snapshot
 from .captcha import CaptchaGate
@@ -124,6 +124,7 @@ class WebSession:
                 if response is not None and response.status == 404:
                     raise NotFound(f"TikTok has no page at {urlparse(url).path}")
                 await page.wait_for_timeout(settle)
+                await human.read(page)
                 await self.gate.hold(page)
                 await self.check()
                 await self.dismiss()
@@ -166,7 +167,7 @@ class WebSession:
                     await page.keyboard.press("Escape")
                     await page.wait_for_timeout(400)
                     if await drawer.first.is_visible():
-                        await page.locator("[data-e2e=inbox-icon]").first.click(timeout=2000)
+                        await human.click(page.locator("[data-e2e=inbox-icon]").first, timeout=2000)
                         await page.wait_for_timeout(400)
                     acted = True
             except Exception:
@@ -175,7 +176,7 @@ class WebSession:
                 try:
                     button = page.locator(selector).first
                     if await button.count() and await button.is_visible():
-                        await button.click(timeout=1500)
+                        await human.click(button, timeout=1500)
                         await page.wait_for_timeout(400)
                         acted = True
                 except Exception:
@@ -183,7 +184,7 @@ class WebSession:
             try:
                 later = page.locator("[role=dialog] button, .TUXModal-overlay button").filter(has_text=LATER).first
                 if await later.count() and await later.is_visible():
-                    await later.click(timeout=1500)
+                    await human.click(later, timeout=1500)
                     acted = True
             except Exception:
                 pass
@@ -299,6 +300,7 @@ class WebSession:
                      method: str = "POST") -> dict:
         await self.page()
         paths = _paths(match)
+        await human.before_action(self)
         for attempt in range(2):
             loop = asyncio.get_running_loop()
             future: asyncio.Future = loop.create_future()
@@ -372,7 +374,7 @@ class WebSession:
                 continue
             try:
                 await item.scroll_into_view_if_needed(timeout=3000)
-                await item.click(timeout=4000)
+                await human.click(item, timeout=4000)
                 return
             except Exception:
                 await self.dismiss()

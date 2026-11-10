@@ -6,7 +6,7 @@ import time
 
 from playwright.async_api import Page
 
-from . import labels
+from . import human, labels
 from .captcha import CaptchaGate
 from .constants import CONTENT_URL, UPLOAD_URL
 from .errors import BadMedia, LoggedOut, PageChanged, PublishFailed, TikSocketError, Unavailable
@@ -52,7 +52,7 @@ class Uploader:
             if not await tab.count():
                 tab = page.get_by_text(labels.exact("photos")).first
             try:
-                await tab.click(timeout=5000)
+                await human.click(tab, timeout=5000)
             except Exception:
                 pass
             try:
@@ -130,11 +130,11 @@ class Uploader:
         try:
             if not await field.count():
                 return
-            await field.click(timeout=5000)
+            await human.click(field, timeout=5000)
             await field.fill(title, timeout=5000)
             if (await field.input_value()).strip() != title.strip():
                 await field.fill("")
-                await page.keyboard.type(title, delay=15)
+                await human.type_text(page, title)
         except Exception as exc:
             log.warning("tiktok title not set: %s", exc)
 
@@ -149,7 +149,7 @@ class Uploader:
                 if not await opener.count():
                     return ""
                 await opener.scroll_into_view_if_needed(timeout=5000)
-                await opener.click(timeout=5000)
+                await human.click(opener, timeout=5000)
                 dialog = page.locator("[role=dialog], [class*=modal i]").filter(has=page.get_by_role("button", name=labels.exact("use"))).last
                 await dialog.wait_for(state="visible", timeout=20000)
                 if query:
@@ -174,7 +174,7 @@ class Uploader:
                     name = ((await row.inner_text(timeout=3000)) or "").split("\n")[0].strip()
                 except Exception:
                     pass
-                await first.click(timeout=5000)
+                await human.click(first, timeout=5000)
                 try:
                     await dialog.wait_for(state="hidden", timeout=10000)
                 except Exception:
@@ -205,7 +205,7 @@ class Uploader:
         page = self.page
         target = page.locator('div[contenteditable="true"]').first
         try:
-            await target.click(timeout=8000)
+            await human.click(target, timeout=8000)
         except Exception as exc:
             raise PageChanged("TikTok upload page changed") from exc
         await page.keyboard.press("Control+A")
@@ -216,7 +216,7 @@ class Uploader:
                 await page.keyboard.press("Escape")
                 await page.keyboard.press("Shift+Enter")
             if line:
-                await page.keyboard.type(line, delay=12)
+                await human.type_text(page, line)
         await page.keyboard.press("Escape")
         await page.wait_for_timeout(600)
 
@@ -234,7 +234,7 @@ class Uploader:
                 return
             state = await switch.get_attribute("aria-checked")
             if state == "true":
-                await switch.click(timeout=3000, force=True)
+                await human.click(switch, timeout=3000, force=True)
                 await page.wait_for_timeout(800)
         except Exception:
             pass
@@ -247,7 +247,7 @@ class Uploader:
                 button = page.get_by_role("button", name=labels.exact(key)).first
                 try:
                     if await button.count() and await button.is_visible():
-                        await button.click(timeout=1200)
+                        await human.click(button, timeout=1200)
                         clicked = True
                         await page.wait_for_timeout(400)
                 except Exception:
@@ -256,7 +256,7 @@ class Uploader:
                 has_text=labels.pattern("content_prompt")).filter(has=page.get_by_role("button", name=labels.exact("cancel")))
             try:
                 if await prompt.count() and await prompt.first.is_visible():
-                    await prompt.first.get_by_role("button", name=labels.exact("cancel")).first.click(timeout=2000)
+                    await human.click(prompt.first.get_by_role("button", name=labels.exact("cancel")).first, timeout=2000)
                     clicked = True
                     await page.wait_for_timeout(500)
             except Exception:

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
+from . import human
 from . import webparse as wp
 from .auth import AuthState
 from .browser import BrowserHost, snapshot
@@ -164,7 +165,7 @@ class Actions:
             if not want:
                 confirm = await self.web.find(DIALOG_BUTTON, 2.5, _word("Unfollow"))
                 if confirm is not None:
-                    await confirm.click(timeout=4000)
+                    await human.click(confirm, timeout=4000)
 
         async with self.web.lock:
             data = await self._guard(self.web.expect(FOLLOW_PATHS, act))
@@ -202,17 +203,17 @@ class Actions:
                 confirm = await self.web.find(DIALOG_BUTTON, 5, _word("Block", "Confirm"))
                 if confirm is None:
                     raise PageChanged("block confirmation not found")
-                await confirm.click(timeout=4000)
+                await human.click(confirm, timeout=4000)
             else:
                 button = await self.web.find(("button", "[role=button]"), 4, _word("Unblock"))
                 if button is None:
                     await self.web.press(USER_MORE)
                     await self.web.press(MENU, 5, _word("Unblock"))
                 else:
-                    await button.click(timeout=4000)
+                    await human.click(button, timeout=4000)
                 confirm = await self.web.find(DIALOG_BUTTON, 3, _word("Unblock", "Confirm"))
                 if confirm is not None:
-                    await confirm.click(timeout=4000)
+                    await human.click(confirm, timeout=4000)
 
         async with self.web.lock:
             await self._guard(self.web.expect(BLOCK_PATHS, act))
@@ -237,13 +238,13 @@ class Actions:
             button = row.locator("button").filter(has_text=_word("Remove", "Remove follower")).first
             if not await button.count():
                 more = row.locator("button[aria-label], [role=button][aria-label]").first
-                await more.click(timeout=4000)
+                await human.click(more, timeout=4000)
                 await self.web.press(MENU, 4, _word("Remove", "Remove follower", "Remove this follower"))
             else:
-                await button.click(timeout=4000)
+                await human.click(button, timeout=4000)
             confirm = await self.web.find(DIALOG_BUTTON, 4, _word("Remove"))
             if confirm is not None:
-                await confirm.click(timeout=4000)
+                await human.click(confirm, timeout=4000)
 
         async with self.web.lock:
             await self._guard(self.web.expect(("/remove/follower", "/follower/remove", "/commit/follow", "/remove"), act))
@@ -283,7 +284,7 @@ class Actions:
             page = self.web.view
 
             async def scroll():
-                await page.mouse.wheel(0, 8000)
+                await human.scroll(page, 8000)
 
             for _ in range(10):
                 for data in pages:
@@ -314,7 +315,7 @@ class Actions:
             page = self.web.view
 
             async def scroll():
-                await page.mouse.wheel(0, 6000)
+                await human.scroll(page, 6000)
 
             for _ in range(20):
                 if len(posts) >= limit or not pages or not pages[-1].get("hasMore"):
@@ -347,7 +348,7 @@ class Actions:
                 box = page.locator(", ".join(COMMENT_ITEM)).last
                 if await box.count():
                     await box.scroll_into_view_if_needed(timeout=3000)
-                await page.mouse.wheel(0, 3000)
+                await human.scroll(page, 3000)
 
             for _ in range(10):
                 if len(rows) >= limit or not pages or not pages[-1].get("has_more"):
@@ -396,7 +397,7 @@ class Actions:
             await self.web.press(MENU + ("[data-e2e*=repost]",), 5, label)
             confirm = await self.web.find(DIALOG_BUTTON, 2, _word("Remove", "Repost", "Confirm"))
             if confirm is not None:
-                await confirm.click(timeout=3000)
+                await human.click(confirm, timeout=3000)
 
         async with self.web.lock:
             await self._guard(self.web.expect(REPOST_PATHS, act))
@@ -413,12 +414,12 @@ class Actions:
         box = await self.web.find(COMMENT_INPUT, 10)
         if box is None:
             raise PageChanged("comment box not found")
-        await box.click(timeout=4000)
-        await page.keyboard.insert_text(text)
+        await human.click(box, timeout=4000)
+        await human.type_text(page, text)
         await page.wait_for_timeout(500)
         button = await self.web.find(COMMENT_POST, 3)
         if button is not None:
-            await button.click(timeout=4000)
+            await human.click(button, timeout=4000)
         else:
             await page.keyboard.press("Enter")
 
@@ -459,7 +460,7 @@ class Actions:
             reply = holder.locator(", ".join(COMMENT_REPLY)).first
             if not await reply.count():
                 raise PageChanged("reply button not found")
-            await reply.click(timeout=4000)
+            await human.click(reply, timeout=4000)
             await self._write_comment(text)
 
         data = await self._guard(self.web.expect(COMMENT_PATHS, act))
@@ -474,7 +475,7 @@ class Actions:
             icon = holder.locator(", ".join(COMMENT_LIKE)).first
             if not await icon.count():
                 raise PageChanged("comment like button not found")
-            await icon.click(timeout=4000)
+            await human.click(icon, timeout=4000)
 
         try:
             await self._guard(self.web.expect(COMMENT_LIKE_PATHS, act))
@@ -490,11 +491,11 @@ class Actions:
             more = holder.locator(", ".join(COMMENT_MORE)).first
             if not await more.count():
                 raise PageChanged("comment menu not found")
-            await more.click(timeout=4000)
+            await human.click(more, timeout=4000)
             await self.web.press(MENU, 4, _word("Delete"))
             confirm = await self.web.find(DIALOG_BUTTON, 4, _word("Delete"))
             if confirm is not None:
-                await confirm.click(timeout=4000)
+                await human.click(confirm, timeout=4000)
 
         await self._guard(self.web.expect(COMMENT_DELETE_PATHS, act))
         return ActionResult(action="delete_comment", target=str(comment_id))
@@ -548,17 +549,17 @@ class Actions:
             more = row.locator(", ".join(STUDIO_MORE))
             if not await more.count():
                 raise PageChanged("post menu not found")
-            await more.last.click(timeout=4000)
+            await human.click(more.last, timeout=4000)
             entry = await self.web.find(STUDIO_MENU_ITEM, 5, label)
             if entry is None:
                 raise PageChanged("post menu entry not found")
             if (await entry.get_attribute("cursor") or "") == "not-allowed":
                 raise NotSupported("TikTok greyed out this option for the post")
-            await entry.click(timeout=4000)
+            await human.click(entry, timeout=4000)
             if confirm is not None:
                 button = await self.web.find(DIALOG_BUTTON, 5, confirm)
                 if button is not None:
-                    await button.click(timeout=4000)
+                    await human.click(button, timeout=4000)
 
         await self._guard(self.web.expect(paths, act, wait=30))
 
@@ -594,7 +595,7 @@ class Actions:
                 if current is None:
                     raise PageChanged("visibility control not found")
                 if not labels[who_can_view].match(await current.inner_text()):
-                    await current.click(timeout=4000)
+                    await human.click(current, timeout=4000)
                     await self.web.press(("[role=option]",), 5, options[who_can_view])
                     changed["value"] = True
             if comments is not None:
@@ -603,7 +604,7 @@ class Actions:
                 if not await box.count():
                     raise NotSupported("TikTok web did not offer the comment setting for this post")
                 if await box.is_checked() != comments:
-                    await box.click(timeout=3000, force=True)
+                    await human.click(box, timeout=3000, force=True)
                     changed["value"] = True
             if not changed["value"]:
                 raise _Unchanged()
@@ -727,11 +728,11 @@ class Actions:
             box = await self.web.find(selectors, 6)
             if box is None:
                 raise PageChanged("profile field not found")
-            await box.click(timeout=3000)
+            await human.click(box, timeout=3000)
             await page.keyboard.press("Control+A")
             await page.keyboard.press("Delete")
             if value:
-                await page.keyboard.insert_text(value)
+                await human.type_text(page, value)
             await page.wait_for_timeout(400)
 
         async def act():
@@ -745,7 +746,7 @@ class Actions:
                 await upload.set_input_files(str(avatar))
                 apply = await self.web.find(DIALOG_BUTTON, 10, _word("Apply", "Save", "Confirm"))
                 if apply is not None:
-                    await apply.click(timeout=4000)
+                    await human.click(apply, timeout=4000)
                     await page.wait_for_timeout(1500)
             if username is not None:
                 await fill(EDIT_USERNAME, username)
@@ -756,7 +757,7 @@ class Actions:
             await self.web.press(EDIT_SAVE)
             confirm = await self.web.find(DIALOG_BUTTON, 3, _word("Confirm", "Set username", "Save"))
             if confirm is not None:
-                await confirm.click(timeout=4000)
+                await human.click(confirm, timeout=4000)
 
         try:
             async with self.web.lock:
@@ -787,11 +788,11 @@ class Actions:
             current = state == "true" if state is not None else await switch.is_checked()
             if current == private:
                 return ActionResult(action="set_private", target=self.me, changed=False, detail={"private": private})
-            await switch.click(timeout=4000, force=True)
+            await human.click(switch, timeout=4000, force=True)
             confirm = await self.web.find(DIALOG_BUTTON, 4, _word("Switch", "Confirm", "Switch to private",
                                                                    "Switch to public", "Turn on", "Turn off"))
             if confirm is not None:
-                await confirm.click(timeout=4000)
+                await human.click(confirm, timeout=4000)
             await page.wait_for_timeout(2500)
             state = await switch.get_attribute("aria-checked")
             now = state == "true" if state is not None else await switch.is_checked()
@@ -810,10 +811,10 @@ class Actions:
             target = await self.web.find((f"[data-e2e='share-{name}']",), 6)
             if target is None:
                 raise NotFound(f"@{name} is not in your share list, send a message first")
-            await target.click(timeout=4000)
+            await human.click(target, timeout=4000)
             send = await self.web.find(DIALOG_BUTTON + ("[data-floating-ui-portal] button",), 5, _word("Send"))
             if send is not None:
-                await send.click(timeout=4000)
+                await human.click(send, timeout=4000)
 
         async with self.web.lock:
             await self._guard(self.web.expect(("/im/", "/v1/message/send", "/share"), act))
