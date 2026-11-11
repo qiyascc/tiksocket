@@ -84,6 +84,7 @@ class CaptchaGate:
         self.page: Page | None = None
         self.challenge: Challenge | None = None
         self.clip: dict | None = None
+        self.holding = False
         self._turn = asyncio.Lock()
 
     @property
@@ -139,7 +140,7 @@ class CaptchaGate:
                 await self._say("captcha.failed", self.challenge)
                 raise CaptchaRequired("TikTok asked for a captcha and it was not solved in time")
             finally:
-                self.page, self.challenge, self.clip = None, None, None
+                self.page, self.challenge, self.clip, self.holding = None, None, None, False
 
     def _live(self) -> Page:
         if not self.active:
@@ -160,7 +161,8 @@ class CaptchaGate:
         return {"x": x, "y": y, "width": width, "height": height}
 
     async def image(self, quality: int = 80) -> bytes:
-        self.clip = await self._clip()
+        if not (self.holding and self.clip):
+            self.clip = await self._clip()
         return await self._live().screenshot(type="jpeg", quality=quality, timeout=10000, clip=self.clip)
 
     def _point(self, x, y) -> tuple[float, float]:
@@ -192,6 +194,24 @@ class CaptchaGate:
             await page.mouse.move(px, py)
         await page.wait_for_timeout(120)
         await page.mouse.up()
+
+    async def press(self, phase: str, x, y) -> None:
+        page = self._live()
+        px, py = self._point(x, y)
+        if phase == "down":
+            self.holding = True
+            await page.mouse.move(px, py)
+            await page.mouse.down()
+        elif phase == "move":
+            if self.holding:
+                await page.mouse.move(px, py)
+        elif phase == "up":
+            if self.holding:
+                await page.mouse.move(px, py)
+                await page.mouse.up()
+            self.holding = False
+        else:
+            raise BadInput("phase is down, move or up")
 
     async def refresh(self) -> bool:
         page = self._live()

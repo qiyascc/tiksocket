@@ -37,7 +37,9 @@ async def captcha_state(request: web.Request):
 
 
 async def captcha_image(request: web.Request):
-    image = await _sock(request).captcha_image()
+    raw = request.query.get("q", "")
+    quality = max(30, min(90, int(raw))) if raw.isdigit() else 80
+    image = await _sock(request).captcha_image(quality)
     return web.Response(body=image, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
@@ -53,6 +55,12 @@ async def captcha_drag(request: web.Request):
     return web.json_response({"ok": True})
 
 
+async def captcha_press(request: web.Request):
+    data = await _json(request)
+    await _sock(request).captcha_press(str(data.get("phase") or ""), data.get("x"), data.get("y"))
+    return web.json_response({"ok": True})
+
+
 async def captcha_refresh(request: web.Request):
     return web.json_response({"ok": await _sock(request).captcha_refresh()})
 
@@ -62,6 +70,7 @@ def add_routes(router: web.UrlDispatcher, base: str) -> None:
     router.add_get(f"{base}/captcha/image", captcha_image)
     router.add_post(f"{base}/captcha/tap", captcha_tap)
     router.add_post(f"{base}/captcha/drag", captcha_drag)
+    router.add_post(f"{base}/captcha/press", captcha_press)
     router.add_post(f"{base}/captcha/refresh", captcha_refresh)
 
 

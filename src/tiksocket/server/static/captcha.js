@@ -1,12 +1,13 @@
 (() => {
-  const SHOT_MS = 900;
+  const SHOT_MS = 700;
+  const LIVE_MS = 60;
 
   function mount(root, { api, token, onClose }) {
     root.classList.add("cap");
     root.innerHTML = `
       <div class="cap-head"><b class="cap-title">TikTok verification</b><span class="cap-timer muted"></span></div>
       <p class="muted cap-hint">This is the live TikTok page. Drag the slider or click the objects on the picture exactly as you would on TikTok.</p>
-      <div class="cap-stage"><img class="cap-img" alt="" draggable="false" hidden><div class="cap-wait muted">Loading the picture...</div></div>
+      <div class="cap-stage"><img class="cap-img" alt="" draggable="false" hidden><span class="cap-dot" hidden></span><div class="cap-wait muted">Loading the picture...</div></div>
       <div class="row"><button type="button" class="ghost small cap-refresh">New puzzle</button><span class="cap-status muted grow"></span>${onClose ? '<button type="button" class="ghost small cap-close">Hide</button>' : ""}</div>`;
     const $ = (s) => root.querySelector(s);
     const img = $(".cap-img");
@@ -22,11 +23,11 @@
       return res.json();
     };
     const status = (text) => { $(".cap-status").textContent = text || ""; };
-    const shot = () => new Promise((resolve) => {
+    const shot = (quality) => new Promise((resolve) => {
       const next = new Image();
       next.onload = () => { img.src = next.src; img.hidden = false; $(".cap-wait").hidden = true; resolve(); };
       next.onerror = () => resolve();
-      next.src = `${api}/captcha/image?token=${encodeURIComponent(token)}&t=${Date.now()}`;
+      next.src = `${api}/captcha/image?token=${encodeURIComponent(token)}${quality ? `&q=${quality}` : ""}&t=${Date.now()}`;
     });
     const tick = async () => {
       if (stopped) return;
@@ -56,35 +57,64 @@
       const r = img.getBoundingClientRect();
       return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
     };
-    let path = null, last = 0;
+    const dot = $(".cap-dot");
+    const mark = (e) => {
+      const r = img.getBoundingClientRect();
+      dot.style.left = `${e.clientX - r.left}px`;
+      dot.style.top = `${e.clientY - r.top}px`;
+    };
+    let queue = Promise.resolve(), waiting = null, holding = false, start = null, moved = false;
+    const send = (phase, xy) => {
+      queue = queue.then(() => call("/captcha/press", { phase, x: xy[0], y: xy[1] })).catch((err) => status(err.message));
+      return queue;
+    };
+    const flushMove = () => {
+      if (!waiting) return;
+      const xy = waiting; waiting = null;
+      send("move", xy);
+    };
+    let mover = 0;
+    const live = async () => {
+      while (holding && !stopped) {
+        await shot(55);
+        await new Promise((r) => setTimeout(r, LIVE_MS));
+      }
+    };
     img.addEventListener("pointerdown", (e) => {
       if (!pending) return;
       e.preventDefault();
       img.setPointerCapture(e.pointerId);
-      busy = true; last = performance.now();
-      path = [[...point(e), 0]];
+      busy = true; holding = true; moved = false;
+      start = point(e);
+      mark(e); dot.hidden = false;
+      status("Holding...");
+      send("down", start);
+      mover = setInterval(flushMove, 40);
+      live();
     });
     img.addEventListener("pointermove", (e) => {
-      if (!path) return;
-      const now = performance.now();
-      if (now - last < 12) return;
-      path.push([...point(e), Math.round(now - last)]);
-      last = now;
+      if (!holding) return;
+      e.preventDefault();
+      mark(e);
+      const xy = point(e);
+      if (Math.hypot(xy[0] - start[0], xy[1] - start[1]) > 0.01) moved = true;
+      waiting = xy;
     });
     const finish = async (e) => {
-      if (!path) return;
-      path.push([...point(e), Math.round(performance.now() - last)]);
-      const moved = Math.hypot(path[path.length - 1][0] - path[0][0], path[path.length - 1][1] - path[0][1]);
-      const sent = path; path = null;
-      try {
-        if (moved < 0.01) { status("Click sent"); await call("/captcha/tap", { x: sent[0][0], y: sent[0][1] }); }
-        else { status("Drag sent"); await call("/captcha/drag", { path: sent }); }
-      } catch (err) { status(err.message); }
+      if (!holding) return;
+      clearInterval(mover);
+      flushMove();
+      holding = false;
+      dot.hidden = true;
+      status(moved ? "Drag sent" : "Click sent");
+      await send("up", e && e.clientX !== undefined ? point(e) : start);
       busy = false;
-      setTimeout(shot, 500);
+      setTimeout(shot, 300);
+      setTimeout(shot, 1200);
     };
     img.addEventListener("pointerup", finish);
-    img.addEventListener("pointercancel", () => { path = null; busy = false; });
+    img.addEventListener("pointercancel", finish);
+    img.addEventListener("contextmenu", (e) => e.preventDefault());
     $(".cap-refresh").onclick = async () => {
       try { const r = await call("/captcha/refresh", {}); status(r.ok ? "New puzzle requested" : "No refresh button on this captcha"); } catch (e) { status(e.message); }
       setTimeout(shot, 800);

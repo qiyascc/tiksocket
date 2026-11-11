@@ -116,8 +116,12 @@ class Sock:
     def on(self, name, handler):
         self.handlers[name] = handler
 
-    async def captcha_image(self):
+    async def captcha_image(self, quality=80):
+        self.calls.append(("image", quality))
         return b"\xff\xd8jpeg"
+
+    async def captcha_press(self, phase, x, y):
+        self.calls.append(("press", phase, x, y))
 
     async def captcha_tap(self, x, y):
         self.calls.append(("tap", x, y))
@@ -143,11 +147,16 @@ async def test_cli_page_serves_solver_and_checks_token():
         assert state["pending"]["kind"] == "slide"
         image = await client.get(f"/api/captcha/image?token={solver.token}")
         assert image.content_type == "image/jpeg"
+        await client.get(f"/api/captcha/image?token={solver.token}&q=50")
         await client.post("/api/captcha/tap", json={"x": 0.4, "y": 0.6}, headers=auth)
         await client.post("/api/captcha/drag", json={"path": [[0.1, 0.5, 0], [0.6, 0.5, 30]]}, headers=auth)
+        for phase, x in (("down", 0.1), ("move", 0.4), ("up", 0.6)):
+            await client.post("/api/captcha/press", json={"phase": phase, "x": x, "y": 0.5}, headers=auth)
         assert (await (await client.post("/api/captcha/refresh", headers=auth)).json())["ok"] is True
-    assert sock.calls[0] == ("tap", 0.4, 0.6)
-    assert sock.calls[1][0] == "drag"
+    assert sock.calls[:2] == [("image", 80), ("image", 50)]
+    assert sock.calls[2] == ("tap", 0.4, 0.6)
+    assert sock.calls[3][0] == "drag"
+    assert [c[1] for c in sock.calls[4:7]] == ["down", "move", "up"]
     assert solver.url.startswith("http://127.0.0.1:0/?token=")
 
 

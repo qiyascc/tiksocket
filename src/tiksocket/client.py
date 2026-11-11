@@ -378,8 +378,11 @@ class TikSocket(EventEmitter):
     def pending_captcha(self) -> Challenge | None:
         return self.captcha.challenge if self.captcha.active else None
 
-    async def captcha_image(self) -> bytes:
-        return await self.captcha.image()
+    async def captcha_image(self, quality: int = 80) -> bytes:
+        return await self.captcha.image(quality)
+
+    async def captcha_press(self, phase: str, x: float, y: float) -> None:
+        await self.captcha.press(phase, x, y)
 
     async def captcha_tap(self, x: float, y: float) -> None:
         await self.captcha.tap(x, y)
